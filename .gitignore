@@ -1,0 +1,10 @@
+.env
+/__pycache__
+/CSVDATA
+/DB
+/Fabriks
+/itemsF
+/LOGs
+/readyhtml
+/readyJSON
+/sessions
