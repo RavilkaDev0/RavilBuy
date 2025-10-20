@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import requests
 
+from logging_utils import setup_logging
 from getFabrik import ACCOUNT_ORDER, ensure_authenticated_session  # type: ignore
 
 FACTORY_FILES = {
@@ -35,6 +36,13 @@ LISTER_OUTPUT_DIRS = {
 
 MAX_WORKERS = 5
 LOG_DIR = Path("LOGs")
+
+LOGGER = logging.getLogger("getItems")
+
+
+def configure_logging(verbose: bool) -> logging.Logger:
+    console_level = logging.DEBUG if verbose else logging.INFO
+    return setup_logging("getItems", console_level=console_level)
 
 PRODUCTS_PATH = "/afterbuy/shop/produkte.aspx"
 LISTER_PATH = "/afterbuy/ebayliste2.aspx"
@@ -403,7 +411,7 @@ def process_entities(
                     f"[{account}][{console_prefix}] {entity_name} ({entity_id}) -> "
                     f"{count} items saved to {output_path}"
                 )
-                print(message)
+                LOGGER.info(message)
                 logger.info(
                     "%s (%s): сохранено %d товаров (%s)",
                     entity_name,
@@ -416,7 +424,7 @@ def process_entities(
                 error_msg = (
                     f"[ERROR] {account} / {entity.get('name')} ({entity.get('id')}): {exc}"
                 )
-                print(error_msg)
+                LOGGER.error(error_msg)
                 logger.error(
                     "Ошибка фабрики %s (%s): %s",
                     entity.get("name"),
@@ -464,11 +472,24 @@ def main() -> None:
         default="all",
         help="Выбрать набор данных: product, lister или all (по умолчанию).",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Включить подробное логирование (DEBUG).",
+    )
     args = parser.parse_args()
+
+    _ = configure_logging(args.verbose)
 
     accounts = ACCOUNT_ORDER if args.account is None else [args.account]
     dataset_keys: Sequence[str] = (
         ("product", "lister") if args.dataset == "all" else (args.dataset,)
+    )
+
+    LOGGER.info(
+        "Старт getItems. Аккаунты: %s. Наборы: %s",
+        ", ".join(accounts),
+        ", ".join(dataset_keys),
     )
 
     loggers: Dict[str, logging.Logger] = {}
@@ -489,14 +510,14 @@ def main() -> None:
             logger = loggers[account]
             entity_path = entity_files_map.get(account)  # type: ignore[attr-defined]
             if entity_path is None:
-                message = f"[WARN] Нет файла с данными ({dataset_label}) для аккаунта {account}"
-                print(message)
+                message = f"Нет файла с данными ({dataset_label}) для аккаунта {account}"
+                LOGGER.warning(message)
                 logger.warning(message)
                 continue
             entity_path = Path(entity_path)
             if not entity_path.exists():
-                message = f"[WARN] Файл {entity_path} не найден для {account} ({dataset_label})"
-                print(message)
+                message = f"Файл {entity_path} не найден для {account} ({dataset_label})"
+                LOGGER.warning(message)
                 logger.warning(message)
                 continue
             entities = load_entities(entity_path)
@@ -504,9 +525,9 @@ def main() -> None:
                 entities = entities[: args.limit]
             if not entities:
                 message = (
-                    f"[WARN] Нет записей в {entity_path} для {account} ({dataset_label})"
+                    f"Нет записей в {entity_path} для {account} ({dataset_label})"
                 )
-                print(message)
+                LOGGER.warning(message)
                 logger.warning(message)
                 continue
             tasks.append((account, entities))
@@ -515,7 +536,7 @@ def main() -> None:
             continue
 
         tasks_dict = {account: entities for account, entities in tasks}
-        print(f"=== {dataset_label} ===")
+        LOGGER.info("=== %s ===", dataset_label)
         for account, entities in tasks:
             loggers[account].info(
                 "Начало обработки набора '%s': %d элементов",
@@ -540,7 +561,7 @@ def main() -> None:
                     if failures:
                         retry_plan.setdefault(account, []).extend(failures)
                 except Exception as exc:
-                    print(f"[ERROR] {account}: {exc}")
+                    LOGGER.error("[%s] Ошибка выполнения задач: %s", account, exc)
                     logger.error("Ошибка выполнения задач аккаунта: %s", exc, exc_info=True)
                     retry_plan.setdefault(account, []).extend(
                         list(tasks_dict.get(account, []))
@@ -549,7 +570,7 @@ def main() -> None:
         if not retry_plan:
             continue
 
-        print("Повторная попытка для неудачных фабрик...")
+        LOGGER.info("Повторная попытка для неудачных фабрик...")
         for account, pending in retry_plan.items():
             unique: Dict[str, Dict[str, str]] = {}
             for entity in pending:
@@ -562,11 +583,12 @@ def main() -> None:
             failures = process_entities(account, remaining, config, logger)
             if failures:
                 names = ", ".join(f"{f['name']} ({f['id']})" for f in failures)
-                print(f"[WARN] После повторной попытки для {account} остались ошибки: {names}")
+                LOGGER.warning("После повторной попытки для %s остались ошибки: %s", account, names)
                 logger.warning("После повторной попытки остались ошибки: %s", names)
             else:
                 logger.info("Повторная попытка выполнена успешно")
 
+    LOGGER.info("Завершение getItems.")
 
 if __name__ == "__main__":
     main()

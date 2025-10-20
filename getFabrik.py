@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import requests
 
+from logging_utils import setup_logging
+
 from Login import (  # type: ignore
     ACCOUNT_DOMAINS,
     AfterbuyClient,
@@ -46,6 +48,13 @@ LISTER_OUTPUTS = {
 }
 TARGET_CHOICES = ("catalog", "lister", "all")
 LOG_DIR = Path("LOGs")
+
+LOGGER = logging.getLogger("getFabrik")
+
+
+def configure_logging(verbose: bool) -> logging.Logger:
+    console_level = logging.DEBUG if verbose else logging.INFO
+    return setup_logging("getFabrik", console_level=console_level)
 
 
 class OptionCollector(HTMLParser):
@@ -320,7 +329,14 @@ def main() -> None:
         default="all",
         help="Data to export: catalog, lister, or all (default).",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Enable detailed logging (DEBUG level).",
+    )
     args = parser.parse_args()
+
+    _ = configure_logging(args.verbose)
 
     accounts = ACCOUNT_ORDER if args.account is None else [args.account]
     target_list: Sequence[str]
@@ -328,6 +344,8 @@ def main() -> None:
         target_list = ("catalog", "lister")
     else:
         target_list = (args.target,)
+
+    LOGGER.info("Старт getFabrik. Аккаунты: %s. Цели: %s", ", ".join(accounts), ", ".join(target_list))
 
     max_workers = min(len(accounts), 10) or 1
     loggers = {account: setup_logger(account) for account in accounts}
@@ -343,14 +361,16 @@ def main() -> None:
             try:
                 results = future.result()
             except Exception as exc:
-                print(f"[ERROR] {account}: {exc}")
+                LOGGER.error("[%s] Ошибка обработки аккаунта: %s", account, exc)
                 logger.error("Ошибка обработки аккаунта: %s", exc, exc_info=True)
                 continue
             for kind, path, count in results:
                 label = "Catalog factories" if kind == "catalog" else "Lister collections"
-                print(f"[{account}] {label}: saved {count} entries to {path}")
+                LOGGER.info("[%s] %s: сохранено %d записей (%s)", account, label, count, path)
                 logger.info("%s: сохранено %d записей (%s)", label, count, path)
 
+    LOGGER.info("Завершение getFabrik.")
 
 if __name__ == "__main__":
     main()
+

@@ -1,7 +1,7 @@
-import argparse
+LOGGER = setup_logging(" Login\)
+
 import html
 import json
-import logging
 import os
 import re
 import sys
@@ -13,13 +13,6 @@ import requests
 from requests import Response, Session
 
 from logging_utils import setup_logging
-
-LOGGER = logging.getLogger("Login")
-
-
-def configure_logging(verbose: bool) -> logging.Logger:
-    console_level = logging.DEBUG if verbose else logging.INFO
-    return setup_logging("Login", console_level=console_level)
 
 
 SESSION_DIR = Path("sessions")
@@ -222,25 +215,6 @@ def save_cookies(account: str, session: Session) -> Path:
     return target_path
 
 
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Выполнить авторизацию Afterbuy и сохранить cookies"
-    )
-    parser.add_argument(
-        "--account",
-        action="append",
-        help="Ограничить аккаунтами (можно несколько, регистр не важен).",
-        type=str.upper,
-    )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Подробный лог (DEBUG).",
-    )
-    return parser.parse_args()
-
-
 def run_login_for_account(account: str, credentials: Dict[str, str]) -> Optional[Path]:
     username = credentials["login"]
     password = credentials["password"]
@@ -249,55 +223,41 @@ def run_login_for_account(account: str, credentials: Dict[str, str]) -> Optional
     try:
         session = client.login()
     except Exception as exc:  # noqa: BLE001 - surface all issues to caller
-        LOGGER.exception("[%s] Ошибка авторизации: %s", account, exc)
+        print(f"[ERROR] {account}: {exc}", file=sys.stderr)
         return None
     cookies_path = save_cookies(account, session)
-    LOGGER.info("[%s] Сессия сохранена: %s", account, cookies_path)
-    session.close()
+    print(f"[OK] {account} -> session saved to {cookies_path}")
     return cookies_path
 
 
 def main() -> None:
-    args = parse_args()
-    logger = configure_logging(args.verbose)
-
     env_path = Path(".env")
     try:
         env = read_env_file(env_path)
     except FileNotFoundError as exc:
-        logger.error("Не удалось прочитать .env: %s", exc)
+        print(f"[ERROR] {exc}", file=sys.stderr)
         sys.exit(1)
 
     accounts = extract_accounts(env)
     if not accounts:
-        logger.error("В .env не найдены пары *_LOGIN/*_PASSWORD.")
+        print(
+            "[ERROR] No *_LOGIN/*_PASSWORD pairs found in .env file.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
-    selected = {acc.upper() for acc in args.account} if args.account else set(accounts.keys())
-    known_accounts = {acc.upper() for acc in accounts}
-    missing = selected - known_accounts
-    if missing:
-        logger.warning("Аккаунты отсутствуют в .env: %s", ", ".join(sorted(missing)))
-
-    targets = {acc: creds for acc, creds in accounts.items() if acc.upper() in selected} if args.account else accounts
-    if not targets:
-        logger.error("Нет доступных аккаунтов для авторизации.")
-        sys.exit(1)
-
-    for account, creds in targets.items():
+    for account, creds in accounts.items():
         domain = ACCOUNT_DOMAINS.get(account.upper())
         if not domain:
-            logger.error("[%s] Не найден домен в настройках.", account)
+            print(
+                f"[ERROR] {account}: domain mapping missing.",
+                file=sys.stderr,
+            )
             continue
         creds["domain"] = domain
-        logger.info("[%s] Авторизация пользователя %s", account, creds["login"])
-        result = run_login_for_account(account, creds)
-        if result is None:
-            logger.error("[%s] Авторизация завершилась с ошибкой.", account)
-        else:
-            logger.info("[%s] Cookies сохранены в %s", account, result)
+        print(f"Logging in as {account} ({creds['login']})...")
+        run_login_for_account(account, creds)
 
-    logger.info("Авторизация завершена.")
 
 if __name__ == "__main__":
     main()

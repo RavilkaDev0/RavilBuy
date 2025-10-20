@@ -13,6 +13,7 @@ from urllib.parse import unquote
 
 import requests
 
+from logging_utils import setup_logging
 from getFabrik import (
     ACCOUNT_ORDER,
     SelectOptionParser,
@@ -59,6 +60,8 @@ PRODUCT_REFERER_TEMPLATE = (
     "productSearchUserTag4=0&SuchZusatzfeld1=&SuchZusatzfeld2=&SuchZusatzfeld3=&"
     "SuchZusatzfeld4=&SuchZusatzfeld5=&SuchZusatzfeld6=&spoid=0&art=SetAuswahl&ShowAdditionalFields=1"
 )
+
+LOGGER = logging.getLogger("exportProdukt")
 
 
 @dataclass(slots=True)
@@ -436,7 +439,7 @@ def discover_factories_for_account(
     account_key = account.upper()
     directory = ITEMS_ROOT / f"{account_key}{ACCOUNT_PRODUCT_DIR_SUFFIX}"
     if not directory.exists():
-        logging.warning(
+        LOGGER.warning(
             "Каталог с фабриками не найден: %s (аккаунт %s)",
             directory,
             account_key,
@@ -452,7 +455,7 @@ def discover_factories_for_account(
         try:
             task = load_factory_from_json(path)
         except Exception as exc:  # noqa: BLE001
-            logging.error("Не удалось прочитать %s: %s", path, exc)
+            LOGGER.error("Не удалось прочитать %s: %s", path, exc)
             continue
         if id_set and task.factory_id not in id_set:
             continue
@@ -478,9 +481,9 @@ def find_existing_export(output_dir: Path, factory: FactoryExportTask) -> Option
     return fallback if fallback.is_file() else None
 
 
-def configure_logging(verbose: bool) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
+def configure_logging(verbose: bool) -> logging.Logger:
+    console_level = logging.DEBUG if verbose else logging.INFO
+    return setup_logging("exportProdukt", console_level=console_level)
 
 
 def parse_args() -> argparse.Namespace:
@@ -565,9 +568,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    configure_logging(args.verbose)
+    logger = configure_logging(args.verbose)
 
     accounts = args.account if args.account else list(ACCOUNT_ORDER)
+    logger.info(
+        "Старт экспорта продуктов. Аккаунты: %s",
+        ", ".join(accounts) if accounts else "<нет>",
+    )
     accounts = [account.upper() for account in accounts]
 
     factory_ids = _normalize_sequence(args.factory_ids)
@@ -581,10 +588,10 @@ def main() -> None:
             args.limit,
         )
         if not tasks:
-            logging.info("Аккаунт %s: подходящих фабрик не найдено.", account)
+            LOGGER.info("Аккаунт %s: подходящих фабрик не найдено.", account)
             continue
 
-        logging.info(
+        LOGGER.info(
             "Аккаунт %s: отобрано %d фабрик для экспорта.",
             account,
             len(tasks),
@@ -592,7 +599,7 @@ def main() -> None:
 
         if args.dry_run:
             for task in tasks:
-                logging.info(
+                LOGGER.info(
                     "  • %s (%s) — %d товаров (из %s)",
                     task.factory_name or "<без названия>",
                     task.factory_id,
@@ -604,7 +611,7 @@ def main() -> None:
         try:
             session, domain = ensure_authenticated_session(account)
         except Exception as exc:  # noqa: BLE001
-            logging.error(
+            LOGGER.error(
                 "Не удалось подготовить авторизованную сессию для аккаунта %s: %s",
                 account,
                 exc,
@@ -622,7 +629,7 @@ def main() -> None:
                 expprod=args.expprod,
             )
             if args.verbose:
-                logging.debug(
+                LOGGER.debug(
                     "[%s] Используется definition=%s, export_format=%s, encoding=%s",
                     account,
                     export_config.definition_id,
@@ -636,7 +643,7 @@ def main() -> None:
                 if args.skip_existing:
                     existing = find_existing_export(account_output_dir, task)
                     if existing:
-                        logging.info(
+                        LOGGER.info(
                             "[%s %d/%d] Пропуск: CSV уже существует (%s).",
                             account,
                             index,
@@ -645,7 +652,7 @@ def main() -> None:
                         )
                         continue
 
-                logging.info(
+                LOGGER.info(
                     "[%s %d/%d] Экспорт фабрики %s (%s) — %d товаров.",
                     account,
                     index,
@@ -667,7 +674,7 @@ def main() -> None:
                         save_export_encoding=export_config.save_export_encoding,
                     )
                 except Exception as exc:  # noqa: BLE001
-                    logging.error(
+                    LOGGER.error(
                         "[%s %d/%d] Ошибка при экспорте %s (%s): %s",
                         account,
                         index,
@@ -678,7 +685,7 @@ def main() -> None:
                     )
                     continue
 
-                logging.info(
+                LOGGER.info(
                     "[%s %d/%d] CSV сохранён в %s",
                     account,
                     index,
