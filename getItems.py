@@ -152,6 +152,7 @@ HIDDEN_INPUT_NAME = "allmyupdtids"
 DATASETS = {
     'product': {
         'entity_files': FACTORY_FILES,
+        'count_files': FACTORY_FILES,
         'output_dirs': PRODUCT_OUTPUT_DIRS,
         'base_params': PRODUCT_PARAMS,
         'endpoint': PRODUCTS_PATH,
@@ -241,6 +242,63 @@ def load_entities(path: Path) -> List[Dict[str, str]]:
             continue
         result.append({"id": factory_id, "name": name})
     return result
+
+
+def update_entity_counts_file(path: Path, updates: Dict[str, Tuple[str, int]]) -> None:
+    if not updates or not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        LOGGER.warning("Не удалось обновить файл фабрик %s: %s", path, exc)
+        return
+    if not isinstance(data, list):
+        LOGGER.warning("Ожидался список в файле %s, пропускаем обновление item_count", path)
+        return
+    changed = False
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        entity_id = str(entry.get("id", "")).strip()
+        if not entity_id:
+            continue
+        info = updates.get(entity_id)
+        if info is None:
+            continue
+        name, count = info
+        if name:
+            current_name = str(entry.get("name", "")).strip()
+            if current_name != name:
+                entry["name"] = name
+                changed = True
+        if entry.get("item_count") != count:
+            entry["item_count"] = count
+            changed = True
+    if not changed:
+        return
+    try:
+        path.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        LOGGER.warning("Не удалось сохранить обновлённый файл фабрик %s: %s", path, exc)
+
+
+def read_item_count_from_file(path: Path) -> Optional[int]:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = data.get("item_count")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def sanitize_filename(name: str) -> str:
@@ -344,6 +402,13 @@ def process_entities(
     output_map = config["output_dirs"]  # type: ignore[index]
     output_root: Path = output_map[account]  # type: ignore[index]
     output_root.mkdir(parents=True, exist_ok=True)
+    count_updates: Dict[str, Tuple[str, int]] = {}
+    counts_path: Optional[Path] = None
+    count_map = config.get("count_files")  # type: ignore[assignment]
+    if isinstance(count_map, dict):
+        count_target = count_map.get(account)
+        if count_target:
+            counts_path = Path(count_target)
     headers_template = dict(session.headers)
     cookies_template = clone_cookie_jar(session.cookies)
     session.close()
@@ -407,16 +472,18 @@ def process_entities(
             entity = future_to_entity[future]
             try:
                 entity_name, entity_id, count, output_path = future.result()
+                stored_count = read_item_count_from_file(output_path) or count
+                count_updates[entity_id] = (entity_name, stored_count)
                 message = (
                     f"[{account}][{console_prefix}] {entity_name} ({entity_id}) -> "
-                    f"{count} items saved to {output_path}"
+                    f"{stored_count} items saved to {output_path}"
                 )
                 LOGGER.info(message)
                 logger.info(
                     "%s (%s): сохранено %d товаров (%s)",
                     entity_name,
                     entity_id,
-                    count,
+                    stored_count,
                     output_path,
                 )
             except Exception as exc:
@@ -432,6 +499,8 @@ def process_entities(
                     exc,
                     exc_info=True,
                 )
+    if counts_path and count_updates:
+        update_entity_counts_file(counts_path, count_updates)
     if failed_entities:
         logger.warning(
             "Фабрики с ошибками (%d шт.): %s",

@@ -1,2 +1,0 @@
-    args = parse_args()
-    logger = configure_logging(args.verbose)
