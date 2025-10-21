@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import json
+import threading
 import shlex
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 
 from flask import Flask, jsonify, request, send_from_directory
 
 from addIgnore import IGNORE_FABRIKS, add_ignore_entry
+from clean_data import list_targets as list_clean_targets
 
 BASE_DIR = Path(__file__).resolve().parent
 SITE_DIR = BASE_DIR / "Site"
@@ -20,6 +22,11 @@ app = Flask(
     static_url_path="",
     template_folder=str(SITE_DIR),
 )
+
+_RUN_LOCK = threading.Lock()
+_RUN_PROCESS: Optional[subprocess.Popen[str]] = None
+_CLEAN_LOCK = threading.Lock()
+_CLEAN_PROCESS: Optional[subprocess.Popen[str]] = None
 
 
 @app.route("/")
@@ -153,38 +160,161 @@ def api_run_main():
         return []
 
     steps = normalize_list(payload.get("steps"))
-    skip = normalize_list(payload.get("skip"))
     log_level = str(payload.get("log_level") or "INFO")
 
     args = [sys.executable, "main.py"]
     if steps:
         args.append("--steps")
         args.extend(steps)
-    if skip:
-        args.append("--skip")
-        args.extend(skip)
     if log_level:
         args.extend(["--log-level", log_level])
 
+    with _RUN_LOCK:
+        global _RUN_PROCESS
+        if _RUN_PROCESS and _RUN_PROCESS.poll() is None:
+            return (
+                jsonify({"error": "Процесс уже выполняется. Дождитесь завершения или остановите его."}),
+                409,
+            )
+        try:
+            proc = subprocess.Popen(
+                args,
+                cwd=BASE_DIR,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": f"Не удалось запустить main.py: {exc}"}), 500
+        _RUN_PROCESS = proc
+
     try:
-        completed = subprocess.run(
-            args,
-            cwd=BASE_DIR,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return jsonify({"error": f"Не удалось запустить main.py: {exc}"}), 500
+        stdout, stderr = proc.communicate()
+        returncode = proc.returncode
+    finally:
+        with _RUN_LOCK:
+            if _RUN_PROCESS is proc:
+                _RUN_PROCESS = None
 
     return jsonify(
         {
-            "returncode": completed.returncode,
-            "stdout": completed.stdout or "",
-            "stderr": completed.stderr or "",
+            "returncode": returncode,
+            "stdout": stdout or "",
+            "stderr": stderr or "",
             "command": " ".join(shlex.quote(str(arg)) for arg in args),
         }
     )
+
+
+@app.post("/api/stop-main")
+def api_stop_main():
+    with _RUN_LOCK:
+        proc = _RUN_PROCESS
+        if not proc or proc.poll() is not None:
+            return jsonify({"message": "Процесс не выполняется."}), 200
+        proc.terminate()
+
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    finally:
+        with _RUN_LOCK:
+            if _RUN_PROCESS is proc:
+                _RUN_PROCESS = None
+
+    return jsonify({"message": "Попытка остановить процесс выполнена."})
+
+
+@app.get("/api/clean-targets")
+def api_clean_targets():
+    try:
+        targets = list_clean_targets()
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": f"Не удалось получить список путей: {exc}"}), 500
+    return jsonify({"targets": targets})
+
+
+@app.post("/api/run-clean")
+def api_run_clean():
+    payload = request.get_json(silent=True) or {}
+    dry_run = bool(payload.get("dry_run"))
+    force = bool(payload.get("force"))
+    targets_payload = payload.get("targets")
+
+    def normalize_list(value) -> List[str]:
+        if isinstance(value, list):
+            return [str(item) for item in value if item]
+        return []
+
+    targets = normalize_list(targets_payload)
+
+    args = [sys.executable, "clean_data.py"]
+    if dry_run:
+        args.append("--dry-run")
+    if force or not dry_run:
+        args.append("--force")
+    if targets:
+        for target_id in targets:
+            args.extend(["--target", target_id])
+
+    with _CLEAN_LOCK:
+        global _CLEAN_PROCESS
+        if _CLEAN_PROCESS and _CLEAN_PROCESS.poll() is None:
+            return (
+                jsonify({"error": "Очистка уже выполняется. Дождитесь завершения или остановите её."}),
+                409,
+            )
+        try:
+            proc = subprocess.Popen(
+                args,
+                cwd=BASE_DIR,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": f"Не удалось запустить clean_data.py: {exc}"}), 500
+        _CLEAN_PROCESS = proc
+
+    try:
+        stdout, stderr = proc.communicate()
+        returncode = proc.returncode
+    finally:
+        with _CLEAN_LOCK:
+            if _CLEAN_PROCESS is proc:
+                _CLEAN_PROCESS = None
+
+    return jsonify(
+        {
+            "returncode": returncode,
+            "stdout": stdout or "",
+            "stderr": stderr or "",
+            "command": " ".join(shlex.quote(str(arg)) for arg in args),
+        }
+    )
+
+
+@app.post("/api/stop-clean")
+def api_stop_clean():
+    with _CLEAN_LOCK:
+        proc = _CLEAN_PROCESS
+        if not proc or proc.poll() is not None:
+            return jsonify({"message": "Очистка не выполняется."}), 200
+        proc.terminate()
+
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    finally:
+        with _CLEAN_LOCK:
+            if _CLEAN_PROCESS is proc:
+                _CLEAN_PROCESS = None
+
+    return jsonify({"message": "Попытка остановить очистку выполнена."})
 
 
 if __name__ == "__main__":

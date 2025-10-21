@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Управление Ignore — Afterbuy</title>
+  <title>Управление игнор — Afterbuy</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="hero hero--compact">
     <p class="hero__back"><a href="index.html">← Панель скриптов</a></p>
-    <h1>Добавление фабрик в Ignore</h1>
+    <h1>Добавление фабрик в игнор</h1>
     <p>Выберите фабрики из выгрузок Afterbuy, чтобы подготовить команды для обновления файлов <code>Ignore/*.json</code>.</p>
   </header>
 
@@ -25,7 +25,7 @@
     </section>
 
     <section class="workflow">
-      <h2>Подготовка Ignore</h2>
+      <h2>Подготовка игнор</h2>
       <p class="workflow__hint">Добавьте нужные фабрики в список ниже. Сайт сформирует команды для запуска <code>addIgnore.py</code>.</p>
 
       <form class="command-form command-form--standalone" data-role="add-ignore-form">
@@ -48,7 +48,7 @@
 
         <div class="form-actions">
           <button type="button" class="primary-btn" data-apply-ignore disabled>Применить</button>
-          <span class="hint">Нажмите «Применить», чтобы записать выбранные фабрики в Ignore.</span>
+          <span class="hint">Нажмите «Применить», чтобы записать выбранные фабрики в игнор.</span>
         </div>
       </form>
 
@@ -66,7 +66,7 @@
     <div class="factory-picker__content" role="document">
       <button type="button" class="factory-picker__close" data-picker-close aria-label="Закрыть выбор фабрик">×</button>
       <h2>Выберите фабрики</h2>
-      <p class="factory-picker__intro">Отметьте фабрики, которые нужно добавить в Ignore. Уже добавленные будут подсвечены.</p>
+      <p class="factory-picker__intro">Отметьте фабрики, которые нужно добавить в игнор. Уже добавленные будут подсвечены.</p>
       <div class="factory-picker__controls">
         <label class="factory-picker__control">
           <span>Поиск</span>
@@ -83,11 +83,11 @@
           </select>
         </label>
         <label class="factory-picker__control factory-picker__control--compact">
-          <span>Фильтр Ignore</span>
+          <span>Фильтр игнор</span>
           <select data-picker-ignore>
             <option value="all">Все</option>
             <option value="new">Только новые</option>
-            <option value="ignored">Уже в Ignore</option>
+            <option value="ignored">Уже в игнор</option>
           </select>
         </label>
       </div>

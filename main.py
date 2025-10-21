@@ -13,6 +13,8 @@ from getFabrik import main as fabrik_main  # type: ignore
 from getItems import main as items_main  # type: ignore
 from killFabriks import main as kill_fabriks_main  # type: ignore
 from makeHTML import main as make_html_main  # type: ignore
+from makeJson import main as make_json_main  # type: ignore
+from makeDB import main as make_db_main  # type: ignore
 
 
 StepFunc = Callable[[], None]
@@ -27,6 +29,8 @@ STEPS: Dict[str, StepFunc] = {
     "product-export": export_product_main,
     "make-html": make_html_main,
     "lister-export": export_lister_main,
+    "make-json": make_json_main,
+    "make-db": make_db_main,
 }
 
 

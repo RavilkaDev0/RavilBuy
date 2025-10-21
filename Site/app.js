@@ -2,7 +2,7 @@
 
 (function () {
   const SAFE_VALUE = /^[0-9A-Za-z_.@%+=:,/\\-]+$/;
-  const TOTAL_MAIN_STEPS = 7;
+  const TOTAL_MAIN_STEPS = 9;
   const DEFAULT_COMMANDS = {
     login: "python Login.py",
     fabrik: "python getFabrik.py",
@@ -93,7 +93,8 @@
     if (button.tagName.toLowerCase() === "a") {
       return;
     }
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
       const targetId = button.dataset.modal;
       if (targetId) {
         openModal(targetId);
@@ -349,14 +350,18 @@
     const resultPanel = document.querySelector("[data-main-result]");
     const resultLog = document.querySelector("[data-main-log]");
     const clearButton = document.querySelector("[data-main-clear]");
+    const stopButton = form.querySelector("[data-stop-main]");
 
     if (
       !(runButton instanceof HTMLButtonElement) ||
+      !(stopButton instanceof HTMLButtonElement) ||
       !(resultPanel instanceof HTMLElement) ||
       !(resultLog instanceof HTMLElement)
     ) {
       return;
     }
+
+    let isRunning = false;
 
     function setStatus(message, isError = false) {
       if (!(statusNode instanceof HTMLElement)) {
@@ -367,22 +372,18 @@
     }
 
     function setRunning(running) {
+      isRunning = running;
       runButton.disabled = running;
       runButton.textContent = running ? "Запуск..." : "Запустить main.py";
+      stopButton.disabled = !running;
+      stopButton.textContent = running ? "Экстренно остановить" : "Экстренно остановить";
     }
 
     function collectPayload() {
       const steps = getCheckedValues(form, "steps");
-      const skip = getCheckedValues(form, "skip");
-      const logLevel = getFieldValue(form, "log-level") || "INFO";
-      const payload = {
-        log_level: logLevel,
-      };
+      const payload = {};
       if (steps.length > 0 && steps.length < TOTAL_MAIN_STEPS) {
         payload.steps = steps;
-      }
-      if (skip.length > 0) {
-        payload.skip = skip;
       }
       return payload;
     }
@@ -445,6 +446,31 @@
         setStatus(message, true);
       } finally {
         setRunning(false);
+      }
+    });
+
+    stopButton.addEventListener("click", async () => {
+      if (!isRunning) {
+        return;
+      }
+      stopButton.disabled = true;
+      stopButton.textContent = "Остановка...";
+      setStatus("Запрос на остановку...", false);
+      try {
+        const response = await fetch("/api/stop-main", { method: "POST" });
+        const data = await response.json().catch(() => ({}));
+        const message =
+          data.message ||
+          (response.ok ? "Попытка остановить процесс." : `Ошибка остановки (HTTP ${response.status})`);
+        setStatus(message, !response.ok);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatus(message, true);
+      } finally {
+        if (isRunning) {
+          stopButton.disabled = false;
+          stopButton.textContent = "Экстренно остановить";
+        }
       }
     });
 
@@ -673,6 +699,258 @@
       return commands.join("\n");
     },
   };
+
+    function setupCleanDataRunner() {
+    const form = document.querySelector('[data-role="clean-data"]');
+    if (!(form instanceof HTMLFormElement)) {
+      return;
+    }
+    form.addEventListener('submit', (event) => event.preventDefault());
+
+    const runButton = form.querySelector('[data-run-clean]');
+    const stopButton = form.querySelector('[data-stop-clean]');
+    const statusNode = form.querySelector('[data-clean-status]');
+    const resultPanel = document.querySelector('[data-clean-result]');
+    const resultLog = document.querySelector('[data-clean-log]');
+    const clearButton = document.querySelector('[data-clean-clear]');
+    const targetsContainer = form.querySelector('[data-clean-targets]');
+    const targetsEmpty = form.querySelector('[data-clean-empty]');
+
+    if (
+      !(runButton instanceof HTMLButtonElement) ||
+      !(stopButton instanceof HTMLButtonElement) ||
+      !(resultPanel instanceof HTMLElement) ||
+      !(resultLog instanceof HTMLElement) ||
+      !(targetsContainer instanceof HTMLElement) ||
+      !(targetsEmpty instanceof HTMLElement)
+    ) {
+      return;
+    }
+
+    let isRunning = false;
+    let availableTargets = [];
+
+    function setStatus(message, isError = false) {
+      if (!(statusNode instanceof HTMLElement)) {
+        return;
+      }
+      statusNode.textContent = message;
+      statusNode.classList.toggle('hint--error', isError);
+    }
+
+    function setRunning(running) {
+      isRunning = running;
+      runButton.disabled = running;
+      runButton.textContent = running ? 'Очистка...' : 'Очистить данные';
+      stopButton.disabled = !running;
+    }
+
+    function renderTargets() {
+      targetsContainer.innerHTML = '';
+      if (!availableTargets.length) {
+        targetsEmpty.hidden = false;
+        targetsEmpty.textContent = 'Доступные пути не найдены.';
+        return;
+      }
+      targetsEmpty.hidden = true;
+      const fragment = document.createDocumentFragment();
+      availableTargets.forEach((target) => {
+        const item = document.createElement('li');
+        item.className = 'selection-item';
+
+        const info = document.createElement('div');
+        info.className = 'selection-item__info';
+
+        const title = document.createElement('div');
+        title.className = 'selection-item__title';
+        title.textContent = target.label;
+
+        const meta = document.createElement('div');
+        meta.className = 'selection-item__meta';
+        meta.textContent = target.exists
+          ? `Файлов: ${target.file_count}`
+          : 'Путь не найден';
+
+        info.append(title, meta);
+
+        const control = document.createElement('label');
+        control.className = 'checkbox';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.name = 'target';
+        input.value = target.id;
+        input.checked = true;
+        control.append(input, document.createTextNode(' Очистить'));
+
+        item.append(info, control);
+        fragment.append(item);
+      });
+      targetsContainer.append(fragment);
+    }
+
+    async function loadTargets({ silent = false } = {}) {
+      runButton.disabled = true;
+      targetsContainer.innerHTML = "";
+      targetsEmpty.hidden = false;
+      targetsEmpty.textContent = "Загрузка списка...";
+      if (!silent && !isRunning) {
+        setStatus("Загрузка доступных путей...", false);
+      }
+      try {
+        const response = await fetch('/api/clean-targets');
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || `Ошибка загрузки путей (HTTP ${response.status})`);
+        }
+        availableTargets = Array.isArray(data.targets) ? data.targets : [];
+        renderTargets();
+        if (!isRunning && availableTargets.length) {
+          runButton.disabled = false;
+          if (!silent) {
+            setStatus("Готово к запуску.", false);
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        targetsEmpty.hidden = false;
+        targetsEmpty.textContent = message;
+        setStatus(message, true);
+      }
+    }
+
+    function collectPayload() {
+      const dryRunInput = form.elements.namedItem('dry-run');
+      const forceInput = form.elements.namedItem('force');
+      const dryRun =
+        dryRunInput instanceof HTMLInputElement && dryRunInput.checked;
+      const force =
+        forceInput instanceof HTMLInputElement && forceInput.checked;
+      const selectedTargets = Array.from(
+        form.querySelectorAll('input[name="target"]:checked')
+      ).map((input) => input.value);
+
+      if (!selectedTargets.length) {
+        setStatus('Выберите хотя бы один путь для очистки.', true);
+        return null;
+      }
+      if (!dryRun && !force) {
+        setStatus(
+          'Для реальной очистки включите опцию "Без подтверждения" или выполните dry-run.',
+          true
+        );
+        return null;
+      }
+      return { dry_run: dryRun, force, targets: selectedTargets };
+    }
+
+    function renderResult(data) {
+      resultPanel.hidden = false;
+      const success =
+        typeof data.returncode === 'number' && data.returncode === 0;
+      resultPanel.classList.toggle('result-panel--error', !success);
+      const stdout = (data.stdout || '').trim();
+      const stderr = (data.stderr || '').trim();
+      const command = data.command || '';
+      const lines = [
+        `Код возврата: ${data.returncode}`,
+        command ? `Команда: ${command}` : '',
+        '',
+        '[STDOUT]',
+        stdout || '<пусто>',
+        '',
+        '[STDERR]',
+        stderr || '<пусто>',
+      ].filter(Boolean);
+      resultLog.textContent = lines.join('\n');
+    }
+
+    function renderError(message) {
+      resultPanel.hidden = false;
+      resultPanel.classList.add('result-panel--error');
+      resultLog.textContent = `[ERROR]\n${message}`;
+    }
+
+    runButton.addEventListener('click', async () => {
+      const payload = collectPayload();
+      if (!payload) {
+        return;
+      }
+      setRunning(true);
+      setStatus('Очистка начата...', false);
+      resultPanel.hidden = true;
+      resultPanel.classList.remove('result-panel--error');
+      try {
+        const response = await fetch('/api/run-clean', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const message =
+            data.error || `Ошибка очистки (HTTP ${response.status})`;
+          throw new Error(message);
+        }
+        renderResult(data);
+        const success =
+          typeof data.returncode === 'number' && data.returncode === 0;
+        setStatus(
+          success
+            ? 'Очистка завершена.'
+            : `Завершено с кодом ${data.returncode}.`,
+          !success
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        renderError(message);
+        setStatus(message, true);
+      } finally {\n        setRunning(false);\n        loadTargets({ silent: true });\n      }
+    });
+
+    stopButton.addEventListener('click', async () => {
+      if (!isRunning) {
+        return;
+      }
+      stopButton.disabled = true;
+      setStatus('Запрос на остановку...', false);
+      try {
+        const response = await fetch('/api/stop-clean', { method: 'POST' });
+        const data = await response.json().catch(() => ({}));
+        const message =
+          data.message ||
+          (response.ok
+            ? 'Попытка остановить очистку.'
+            : `Ошибка остановки (HTTP ${response.status})`);
+        setStatus(message, !response.ok);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatus(message, true);
+      } finally {
+        if (isRunning) {
+          stopButton.disabled = false;
+        }
+      }
+    });
+
+    if (clearButton instanceof HTMLButtonElement) {
+      clearButton.addEventListener('click', () => {
+        resultPanel.hidden = true;
+        resultPanel.classList.remove('result-panel--error');
+        resultLog.textContent = '';
+        setStatus('Готово к запуску.', false);
+      });
+    }
+
+    form.addEventListener('change', () => {
+      if (!isRunning) {
+        setStatus('Готово к запуску.', false);
+      }
+    });
+
+    loadTargets();
+  }
 
   function setupKillFabriksUI() {
     const form = document.querySelector(
@@ -1081,5 +1359,12 @@
   });
 
   setupMainRunner();
+  setupCleanDataRunner();
   setupKillFabriksUI();
 })();
+
+
+
+
+
+
