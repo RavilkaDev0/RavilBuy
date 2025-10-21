@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import csv
+import json
 import logging
 import re
+import sqlite3
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple
 from urllib.parse import unquote
+
+import pandas as pd
 
 from logging_utils import setup_logging
 
@@ -16,9 +19,142 @@ DEFAULT_INPUT_BASE = Path("CSVDATA")
 DEFAULT_INPUT_SUFFIX = "_P"
 DEFAULT_OUTPUT_BASE = Path("readyhtml")
 DEFAULT_EAN_COLUMN_CANDIDATES = ("ManufacturerPartNumber", "EAN", "Sku", "SKU")
+DEFAULT_ID_COLUMN_CANDIDATES = ("StandardProductIDValue", "StandardProductIdValue", "ItemId", "StandardProductID")
 DEFAULT_HTML_COLUMN_CANDIDATES = ("Beschreibung", "Description", "HTML")
+DEFAULT_DELIMITER = ";"
+ITEM_JSON_DIRS = {
+    "JV": Path("itemsF") / "JV_I_P",
+    "XL": Path("itemsF") / "XL_I_P",
+}
+MISMATCH_DB_PATH = Path("DB") / "makeHTML_mismatches.db"
+MISMATCH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+_MISMATCH_DB_INITIALIZED = False
 
 LOGGER = logging.getLogger("makeHTML")
+
+
+def load_expected_item_info(account: str, csv_path: Path) -> Tuple[Optional[int], Optional[str], Optional[Path]]:
+    items_root = ITEM_JSON_DIRS.get(account)
+    if not items_root:
+        return None, None, None
+    json_path = items_root / f"{csv_path.stem}.json"
+    if not json_path.exists():
+        return None, None, None
+    try:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        LOGGER.warning("Не удалось прочитать JSON %s: %s", json_path, exc)
+        return None, None, json_path
+    item_count_value = data.get("item_count")
+    try:
+        item_count = int(item_count_value) if item_count_value is not None else None
+    except (TypeError, ValueError):
+        item_count = None
+    factory_name = data.get("factory_name")
+    return item_count, factory_name, json_path
+
+
+def load_csv_dataframe(path: Path, delimiter: str) -> pd.DataFrame:
+    try:
+        df = pd.read_csv(
+            path,
+            sep=delimiter,
+            engine="python",
+            dtype=str,
+            quotechar='"',
+            escapechar="\\",
+            na_filter=False,
+        )
+    except Exception as exc:
+        LOGGER.error("Не удалось прочитать CSV %s: %s", path, exc)
+        return pd.DataFrame()
+    if df.empty:
+        return df
+    return df.fillna("")
+
+
+def ensure_mismatch_db() -> None:
+    global _MISMATCH_DB_INITIALIZED
+    if _MISMATCH_DB_INITIALIZED:
+        return
+    conn = sqlite3.connect(MISMATCH_DB_PATH)
+    try:
+        with conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS mismatches (
+                    account TEXT,
+                    factory TEXT,
+                    row_index INTEGER,
+                    name TEXT,
+                    standard_product_id_value TEXT,
+                    manufacturer_part_number TEXT,
+                    beschreibung TEXT
+                )
+                """
+            )
+    finally:
+        conn.close()
+    _MISMATCH_DB_INITIALIZED = True
+
+
+def write_mismatches(
+    account: str,
+    csv_path: Path,
+    mismatches: List[Tuple[int, pd.Series]],
+) -> None:
+    if not mismatches:
+        return
+    ensure_mismatch_db()
+    factory_name = csv_path.stem
+    records: List[Tuple[object, ...]] = []
+    for idx, row in mismatches:
+        try:
+            row_index = int(idx)
+        except (TypeError, ValueError):
+            row_index = None
+
+        def extract(column: str) -> str:
+            value = row.get(column, "")
+            if pd.isna(value):
+                return ""
+            return str(value)
+
+        records.append(
+            (
+                account,
+                factory_name,
+                row_index,
+                extract("Name"),
+                extract("StandardProductIDValue"),
+                extract("ManufacturerPartNumber"),
+                extract("Beschreibung"),
+            )
+        )
+
+    if not records:
+        return
+
+    conn = sqlite3.connect(MISMATCH_DB_PATH)
+    try:
+        with conn:
+            conn.executemany(
+                """
+                INSERT INTO mismatches (
+                    account,
+                    factory,
+                    row_index,
+                    name,
+                    standard_product_id_value,
+                    manufacturer_part_number,
+                    beschreibung
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                records,
+            )
+    finally:
+        conn.close()
 
 
 def sanitize_filename(value: str) -> str:
@@ -28,53 +164,95 @@ def sanitize_filename(value: str) -> str:
     return cleaned[:150]
 
 
-def detect_columns(headers: Iterable[str]) -> Tuple[Optional[str], Optional[str]]:
+def detect_columns(headers: Iterable[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     header_set = {header.strip(): header.strip() for header in headers}
 
     ean_column = next(
         (header_set.get(candidate) for candidate in DEFAULT_EAN_COLUMN_CANDIDATES if header_set.get(candidate)),
         None,
     )
+    id_column = next(
+        (header_set.get(candidate) for candidate in DEFAULT_ID_COLUMN_CANDIDATES if header_set.get(candidate)),
+        None,
+    )
     html_column = next(
         (header_set.get(candidate) for candidate in DEFAULT_HTML_COLUMN_CANDIDATES if header_set.get(candidate)),
         None,
     )
-    return ean_column, html_column
-
+    return ean_column, id_column, html_column
 
 def decode_html_fragment(raw: str) -> str:
     return unquote(raw)
 
 
 def convert_csv_to_html_files(
+    account: str,
     csv_path: Path,
     output_dir: Path,
     overwrite: bool = True,
-) -> Tuple[int, int]:
+    delimiter: str = DEFAULT_DELIMITER,
+) -> Tuple[int, int, int]:
     output_dir.mkdir(parents=True, exist_ok=True)
     success = 0
     skipped = 0
 
-    with csv_path.open("r", encoding="utf-8", newline="") as handle:
-        reader = csv.DictReader(handle, delimiter=";")
-        if reader.fieldnames is None:
-            LOGGER.warning("Файл %s не содержит заголовков — пропуск.", csv_path)
-            return success, skipped
-        ean_column, html_column = detect_columns(reader.fieldnames)
-        if not ean_column or not html_column:
-            LOGGER.warning(
-                "%s: не удалось определить столбцы (EAN=%s, HTML=%s) — пропуск.",
-                csv_path,
-                ean_column,
-                html_column,
-            )
-            return success, skipped
+    df = load_csv_dataframe(csv_path, delimiter)
+    if df.empty:
+        LOGGER.warning("Файл %s не содержит данных — пропуск.", csv_path)
+        return success, skipped, 0
 
-        for row in reader:
-            raw_ean = row.get(ean_column) or ""
-            raw_html = row.get(html_column) or ""
+    ean_column, id_column, html_column = detect_columns(df.columns)
+    if not ean_column or not html_column:
+        LOGGER.warning(
+            "%s: не удалось определить столбцы (EAN=%s, HTML=%s) — пропуск.",
+            csv_path,
+            ean_column,
+            html_column,
+        )
+        return success, skipped, len(df.index)
+    if not id_column:
+        LOGGER.warning(
+            "%s: колонка StandardProductIDValue отсутствует — используем ManufacturerPartNumber для имени файла.",
+            csv_path,
+        )
 
-            ean = raw_ean.strip()
+    total_rows = len(df.index)
+    mismatches: List[Tuple[int, pd.Series]] = []
+    for index, row in df.iterrows():
+        raw_ean = row.get(ean_column, "")
+        raw_id = row.get(id_column, "") if id_column else ""
+        raw_html = row.get(html_column, "")
+
+        if pd.isna(raw_ean):
+            raw_ean = ""
+        if pd.isna(raw_id):
+            raw_id = ""
+        if pd.isna(raw_html):
+            raw_html = ""
+
+        ean = str(raw_ean).strip()
+        std_id = str(raw_id).strip()
+        if id_column:
+            if not std_id:
+                mismatches.append((index, row))
+                LOGGER.warning(
+                    "[%s] EAN %s: отсутствие StandardProductIDValue — запись пропущена.",
+                    csv_path.name,
+                    ean or "(пусто)",
+                )
+                skipped += 1
+                continue
+            if ean != std_id:
+                mismatches.append((index, row))
+                LOGGER.warning(
+                    "[%s] Несовпадение идентификаторов: ManufacturerPartNumber='%s', StandardProductIDValue='%s' — запись пропущена.",
+                    csv_path.name,
+                    ean,
+                    std_id,
+                )
+                skipped += 1
+                continue
+        else:
             if not ean:
                 LOGGER.warning(
                     "[%s] Строка без значения в колонке '%s' — запись пропущена.",
@@ -83,26 +261,40 @@ def convert_csv_to_html_files(
                 )
                 skipped += 1
                 continue
-            if not raw_html.strip():
-                LOGGER.warning(
-                    "[%s] EAN %s: пустая колонка '%s' — запись пропущена.",
-                    csv_path.name,
-                    ean,
-                    html_column,
-                )
-                skipped += 1
-                continue
 
-            html_content = decode_html_fragment(raw_html)
-            filename = sanitize_filename(ean) + ".html"
-            target_path = output_dir / filename
-            if target_path.exists() and not overwrite:
-                LOGGER.debug("Файл %s уже существует — пропуск.", target_path)
-                skipped += 1
-                continue
-            target_path.write_text(html_content, encoding="utf-8")
-            success += 1
-    return success, skipped
+        if not ean:
+            LOGGER.warning(
+                "[%s] Строка без значения в колонке '%s' — запись пропущена.",
+                csv_path.name,
+                ean_column,
+            )
+            skipped += 1
+            continue
+
+        if not str(raw_html).strip():
+            LOGGER.warning(
+                "[%s] EAN %s: пустая колонка '%s' — запись пропущена.",
+                csv_path.name,
+                ean,
+                html_column,
+            )
+            skipped += 1
+            continue
+
+        html_content = decode_html_fragment(str(raw_html))
+        target_id = std_id if id_column else ean
+        filename = sanitize_filename(target_id or ean) + ".html"
+        target_path = output_dir / filename
+        if target_path.exists() and not overwrite:
+            LOGGER.debug("Файл %s уже существует — пропуск.", target_path)
+            skipped += 1
+            continue
+        target_path.write_text(html_content, encoding="utf-8")
+        success += 1
+
+    write_mismatches(account, csv_path, mismatches)
+
+    return success, skipped, total_rows
 
 
 def list_csv_files(input_dir: Path) -> List[Path]:
@@ -139,10 +331,17 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_OUTPUT_BASE,
         help="Базовый каталог для HTML файлов (по умолчанию readyhtml).",
     )
+    parser.set_defaults(overwrite=True)
     parser.add_argument(
-        "--overwrite",
-        action="store_true",
-        help="Перезаписывать существующие HTML файлы.",
+        "--no-overwrite",
+        dest="overwrite",
+        action="store_false",
+        help="Не перезаписывать существующие HTML файлы.",
+    )
+    parser.add_argument(
+        "--delimiter",
+        default=DEFAULT_DELIMITER,
+        help=f"Разделитель полей CSV (по умолчанию '{DEFAULT_DELIMITER}').",
     )
     parser.add_argument(
         "--limit",
@@ -180,10 +379,13 @@ def main() -> None:
         account_skipped = 0
         for csv_path in csv_files:
             logger.info("[%s] Обработка %s...", account, csv_path.name)
-            success, skipped = convert_csv_to_html_files(
+            expected_count, factory_name, json_path = load_expected_item_info(account, csv_path)
+            success, skipped, total_rows = convert_csv_to_html_files(
+                account,
                 csv_path,
                 output_dir,
                 overwrite=args.overwrite,
+                delimiter=args.delimiter,
             )
             logger.info(
                 "[%s] %s → создано %d HTML, пропущено %d строк.",
@@ -192,8 +394,44 @@ def main() -> None:
                 success,
                 skipped,
             )
-        account_success += success
-        account_skipped += skipped
+            logger.debug(
+                "[%s] %s: всего строк %d, создано %d, пропущено %d.",
+                account,
+                csv_path.name,
+                total_rows,
+                success,
+                skipped,
+            )
+            if total_rows != success + skipped:
+                logger.warning(
+                    "[%s] %s: несоответствие подсчёта строк (всего=%d, создано+пропущено=%d).",
+                    account,
+                    csv_path.name,
+                    total_rows,
+                    success + skipped,
+                )
+            if expected_count is not None:
+                if success != expected_count:
+                    logger.warning(
+                        "[%s] %s: item_count=%d (из %s) не совпадает с созданными HTML=%d (строк в CSV=%d, пропущено=%d)%s",
+                        account,
+                        csv_path.stem,
+                        expected_count,
+                        json_path.name if json_path else "JSON",
+                        success,
+                        total_rows,
+                        skipped,
+                        f" (фабрика: {factory_name})" if factory_name else "",
+                    )
+                else:
+                    logger.info(
+                        "[%s] %s: количество HTML (%d) соответствует item_count.",
+                        account,
+                        csv_path.stem,
+                        success,
+                    )
+            account_success += success
+            account_skipped += skipped
 
         logger.info(
             "[%s] Готово: создано %d HTML файлов, пропущено %d строк. Результат в %s",

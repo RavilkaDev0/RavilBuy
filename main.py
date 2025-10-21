@@ -11,6 +11,8 @@ from exportLister import main as export_lister_main  # type: ignore
 from exportProdukt import main as export_product_main  # type: ignore
 from getFabrik import main as fabrik_main  # type: ignore
 from getItems import main as items_main  # type: ignore
+from killFabriks import main as kill_fabriks_main  # type: ignore
+from makeHTML import main as make_html_main  # type: ignore
 
 
 StepFunc = Callable[[], None]
@@ -20,8 +22,10 @@ LOGGER = logging.getLogger("main")
 STEPS: Dict[str, StepFunc] = {
     "login": login_main,
     "factories": fabrik_main,
+    "kill-fabriks": kill_fabriks_main,
     "items": items_main,
     "product-export": export_product_main,
+    "make-html": make_html_main,
     "lister-export": export_lister_main,
 }
 

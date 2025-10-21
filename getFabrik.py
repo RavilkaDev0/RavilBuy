@@ -289,19 +289,11 @@ def process_account(
             output_path = CATALOG_OUTPUTS[account]
             save_json(output_path, factories)
             results.append(("catalog", output_path, len(factories)))
-            logger.info(
-                "Каталоги: сохранено %d записей в %s", len(factories), output_path
-            )
         if "lister" in targets:
             collections = fetch_lister_collections(session, domain)
             output_path = LISTER_OUTPUTS[account]
             save_json(output_path, collections)
             results.append(("lister", output_path, len(collections)))
-            logger.info(
-                "Коллекции Lister: сохранено %d записей в %s",
-                len(collections),
-                output_path,
-            )
     finally:
         session.close()
     return results

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Панель управления скриптами Afterbuy</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="hero">
+    <h1>Панель управления скриптами Afterbuy</h1>
+    <p>Запускайте основную цепочку экспорта или переходите к управлению Ignore в один клик.</p>
+  </header>
+
+  <main class="dashboard">
+    <section class="card-grid">
+      <article class="script-card">
+        <h2>Цепочка экспорта</h2>
+        <p>Оркестратор <code>main.py</code> выполняет последовательность этапов экспорта.</p>
+        <button type="button" class="open-modal" data-modal="modal-main">Открыть окно</button>
+      </article>
+
+      <article class="script-card">
+        <h2>Добавить в Ignore</h2>
+        <p>Интерфейс для скрипта <code>addIgnore.py</code> с выбором фабрик и мгновенным применением Ignore.</p>
+        <a class="open-modal" href="add-ignore.html">Перейти</a>
+      </article>
+    </section>
+  </main>
+
+  <div class="modal" id="modal-main" aria-hidden="true" role="dialog">
+    <div class="modal__content" role="document">
+      <button type="button" class="modal__close" data-close aria-label="Закрыть окно">×</button>
+      <h2>Цепочка экспорта (main.py)</h2>
+      <p class="modal__intro">Соберите нужные этапы и получите команду для запуска <code>main.py</code>. Этапы выполняются в порядке: авторизация → каталоги → товары → экспорт товаров → экспорт листера.</p>
+
+      <form class="command-form" data-script="main">
+        <fieldset class="field-group">
+          <legend>Этапы, которые нужно выполнить</legend>
+          <label class="checkbox">
+            <input type="checkbox" name="steps" value="login" checked>
+            Авторизация (login)
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="steps" value="factories" checked>
+            Каталоги/коллекции (factories)
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="steps" value="kill-fabriks" checked>
+            Очистка Ignore (kill-fabriks)
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="steps" value="items" checked>
+            Скачивание товаров (items)
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="steps" value="product-export" checked>
+            Экспорт товаров (product-export)
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="steps" value="make-html" checked>
+            Генерация HTML (make-html)
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="steps" value="lister-export" checked>
+            Экспорт листера (lister-export)
+          </label>
+        </fieldset>
+
+        <fieldset class="field-group">
+          <legend>Пропустить этапы</legend>
+          <label class="checkbox">
+            <input type="checkbox" name="skip" value="login">
+            Пропустить login
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="skip" value="factories">
+            Пропустить factories
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="skip" value="kill-fabriks">
+            Пропустить kill-fabriks
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="skip" value="items">
+            Пропустить items
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="skip" value="product-export">
+            Пропустить product-export
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="skip" value="make-html">
+            Пропустить make-html
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="skip" value="lister-export">
+            Пропустить lister-export
+          </label>
+        </fieldset>
+
+        <div class="field-row">
+          <label class="field">
+            Уровень логирования:
+            <select name="log-level">
+              <option value="INFO" selected>INFO (по умолчанию)</option>
+              <option value="DEBUG">DEBUG</option>
+              <option value="WARNING">WARNING</option>
+              <option value="ERROR">ERROR</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="main-actions">
+          <button type="button" class="primary-btn" data-run-main>Запустить main.py</button>
+          <span class="hint" data-main-status>Готово к запуску.</span>
+        </div>
+      </form>
+
+      <div class="result-panel" data-main-result hidden>
+        <div class="result-panel__header">
+          <h3>Результат запуска</h3>
+          <button type="button" class="secondary-btn" data-main-clear>Очистить</button>
+        </div>
+        <pre class="result-panel__log" data-main-log></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" data-backdrop aria-hidden="true"></div>
+  <script src="app.js"></script>
+</body>
+</html>

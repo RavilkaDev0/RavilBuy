@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Управление Ignore — Afterbuy</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="hero hero--compact">
+    <p class="hero__back"><a href="index.html">← Панель скриптов</a></p>
+    <h1>Добавление фабрик в Ignore</h1>
+    <p>Выберите фабрики из выгрузок Afterbuy, чтобы подготовить команды для обновления файлов <code>Ignore/*.json</code>.</p>
+  </header>
+
+  <main class="dashboard add-ignore">
+    <section class="overview">
+      <h2>Доступные фабрики</h2>
+      <p class="overview__hint">Список формируется из файлов в папке <code>Fabriks</code>. Обновите данные скриптом <code>getFabrik.py</code>, если записи устарели.</p>
+      <div class="overview-grid" data-overview-grid>
+        <div class="overview-card overview-card--empty">
+          <p>Загрузка списка...</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="workflow">
+      <h2>Подготовка Ignore</h2>
+      <p class="workflow__hint">Добавьте нужные фабрики в список ниже. Сайт сформирует команды для запуска <code>addIgnore.py</code>.</p>
+
+      <form class="command-form command-form--standalone" data-role="add-ignore-form">
+        <div class="selection-panel">
+          <div class="selection-header">
+            <button type="button" class="secondary-btn" data-open-picker>Добавить фабрики</button>
+            <span class="selection-hint">Можно подобрать сразу несколько фабрик и применить их одним нажатием.</span>
+          </div>
+          <ul class="selection-list" data-selected-list></ul>
+          <p class="selection-empty" data-empty-state>Список Ignore пока пуст. Добавьте фабрики через кнопку выше.</p>
+          <p class="selection-help">После выбора нажмите «Применить», чтобы записать фабрики в список Ignore.</p>
+        </div>
+
+        <div class="checkbox-row">
+          <label class="checkbox">
+            <input type="checkbox" name="overwrite-name">
+            Перезаписывать имя, если фабрика уже есть в Ignore (<code>--overwrite-name</code>)
+          </label>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="primary-btn" data-apply-ignore disabled>Применить</button>
+          <span class="hint">Нажмите «Применить», чтобы записать выбранные фабрики в Ignore.</span>
+        </div>
+      </form>
+
+      <div class="result-panel" data-result-panel hidden>
+        <div class="result-panel__header">
+          <h3>Результат применения</h3>
+          <button type="button" class="secondary-btn" data-clear-result>Очистить</button>
+        </div>
+        <ul class="result-panel__list" data-result-list></ul>
+      </div>
+    </section>
+  </main>
+
+  <div class="factory-picker" id="factory-picker" aria-hidden="true" role="dialog">
+    <div class="factory-picker__content" role="document">
+      <button type="button" class="factory-picker__close" data-picker-close aria-label="Закрыть выбор фабрик">×</button>
+      <h2>Выберите фабрики</h2>
+      <p class="factory-picker__intro">Отметьте фабрики, которые нужно добавить в Ignore. Уже добавленные будут подсвечены.</p>
+      <div class="factory-picker__controls">
+        <label class="factory-picker__control">
+          <span>Поиск</span>
+          <input type="search" placeholder="Название или ID" data-picker-search>
+        </label>
+        <label class="factory-picker__control">
+          <span>Тип</span>
+          <select data-picker-type>
+            <option value="all">Все типы</option>
+            <option value="JV_F_P">JV_F_P — каталоги</option>
+            <option value="XL_F_P">XL_F_P — каталоги</option>
+            <option value="JV_F_L">JV_F_L — листер</option>
+            <option value="XL_F_L">XL_F_L — листер</option>
+          </select>
+        </label>
+        <label class="factory-picker__control factory-picker__control--compact">
+          <span>Фильтр Ignore</span>
+          <select data-picker-ignore>
+            <option value="all">Все</option>
+            <option value="new">Только новые</option>
+            <option value="ignored">Уже в Ignore</option>
+          </select>
+        </label>
+      </div>
+      <div class="factory-picker__list" data-picker-list>
+        <div class="factory-picker__status">Загрузка списка...</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="add-ignore.js"></script>
+</body>
+</html>
