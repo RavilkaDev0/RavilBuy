@@ -349,17 +349,14 @@ def main() -> None:
         }
         for future in as_completed(future_to_account):
             account = future_to_account[future]
-            logger = loggers[account]
             try:
                 results = future.result()
             except Exception as exc:
                 LOGGER.error("[%s] Ошибка обработки аккаунта: %s", account, exc)
-                logger.error("Ошибка обработки аккаунта: %s", exc, exc_info=True)
                 continue
             for kind, path, count in results:
                 label = "Catalog factories" if kind == "catalog" else "Lister collections"
                 LOGGER.info("[%s] %s: сохранено %d записей (%s)", account, label, count, path)
-                logger.info("%s: сохранено %d записей (%s)", label, count, path)
 
     LOGGER.info("Завершение getFabrik.")
 

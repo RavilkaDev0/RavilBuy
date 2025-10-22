@@ -26,9 +26,6 @@ ITEM_JSON_DIRS = {
     "JV": Path("itemsF") / "JV_I_P",
     "XL": Path("itemsF") / "XL_I_P",
 }
-MISMATCH_DB_PATH = Path("DB") / "makeHTML_mismatches.db"
-MISMATCH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-_MISMATCH_DB_INITIALIZED = False
 
 LOGGER = logging.getLogger("makeHTML")
 
@@ -71,91 +68,6 @@ def load_csv_dataframe(path: Path, delimiter: str) -> pd.DataFrame:
     if df.empty:
         return df
     return df.fillna("")
-
-
-def ensure_mismatch_db() -> None:
-    global _MISMATCH_DB_INITIALIZED
-    if _MISMATCH_DB_INITIALIZED:
-        return
-    conn = sqlite3.connect(MISMATCH_DB_PATH)
-    try:
-        with conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS mismatches (
-                    account TEXT,
-                    factory TEXT,
-                    row_index INTEGER,
-                    name TEXT,
-                    standard_product_id_value TEXT,
-                    manufacturer_part_number TEXT,
-                    beschreibung TEXT
-                )
-                """
-            )
-    finally:
-        conn.close()
-    _MISMATCH_DB_INITIALIZED = True
-
-
-def write_mismatches(
-    account: str,
-    csv_path: Path,
-    mismatches: List[Tuple[int, pd.Series]],
-) -> None:
-    if not mismatches:
-        return
-    ensure_mismatch_db()
-    factory_name = csv_path.stem
-    records: List[Tuple[object, ...]] = []
-    for idx, row in mismatches:
-        try:
-            row_index = int(idx)
-        except (TypeError, ValueError):
-            row_index = None
-
-        def extract(column: str) -> str:
-            value = row.get(column, "")
-            if pd.isna(value):
-                return ""
-            return str(value)
-
-        records.append(
-            (
-                account,
-                factory_name,
-                row_index,
-                extract("Name"),
-                extract("StandardProductIDValue"),
-                extract("ManufacturerPartNumber"),
-                extract("Beschreibung"),
-            )
-        )
-
-    if not records:
-        return
-
-    conn = sqlite3.connect(MISMATCH_DB_PATH)
-    try:
-        with conn:
-            conn.executemany(
-                """
-                INSERT INTO mismatches (
-                    account,
-                    factory,
-                    row_index,
-                    name,
-                    standard_product_id_value,
-                    manufacturer_part_number,
-                    beschreibung
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                records,
-            )
-    finally:
-        conn.close()
-
 
 def sanitize_filename(value: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
@@ -292,10 +204,7 @@ def convert_csv_to_html_files(
         target_path.write_text(html_content, encoding="utf-8")
         success += 1
 
-    write_mismatches(account, csv_path, mismatches)
-
     return success, skipped, total_rows
-
 
 def list_csv_files(input_dir: Path) -> List[Path]:
     if not input_dir.exists():

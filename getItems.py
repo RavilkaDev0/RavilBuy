@@ -424,7 +424,6 @@ def process_entities(
     offset_param: str = config.get("offset_param", "rsposition")  # type: ignore[arg-type]
     timeout: int = int(config.get("timeout", 60))  # type: ignore[arg-type]
 
-    logger.info("Старт обработки набора '%s': %d элементов", dataset_label, len(entities))
 
     def handle_entity(entity: Dict[str, str]) -> Tuple[str, str, int, Path]:
         entity_id = entity["id"]
@@ -479,36 +478,22 @@ def process_entities(
                     f"{stored_count} items saved to {output_path}"
                 )
                 LOGGER.info(message)
-                logger.info(
-                    "%s (%s): сохранено %d товаров (%s)",
-                    entity_name,
-                    entity_id,
-                    stored_count,
-                    output_path,
-                )
             except Exception as exc:
                 failed_entities.append(entity)
                 error_msg = (
                     f"[ERROR] {account} / {entity.get('name')} ({entity.get('id')}): {exc}"
                 )
                 LOGGER.error(error_msg)
-                logger.error(
-                    "Ошибка фабрики %s (%s): %s",
-                    entity.get("name"),
-                    entity.get("id"),
-                    exc,
-                    exc_info=True,
-                )
     if counts_path and count_updates:
         update_entity_counts_file(counts_path, count_updates)
     if failed_entities:
-        logger.warning(
+        LOGGER.warning(
             "Фабрики с ошибками (%d шт.): %s",
             len(failed_entities),
             ", ".join(f"{f['name']} ({f['id']})" for f in failed_entities),
         )
     else:
-        logger.info("Все фабрики обработаны успешно")
+        LOGGER.info("Все фабрики обработаны успешно")
     return failed_entities
 
 
@@ -561,14 +546,6 @@ def main() -> None:
         ", ".join(dataset_keys),
     )
 
-    loggers: Dict[str, logging.Logger] = {}
-    for account in accounts:
-        loggers[account] = setup_logger(account)
-        loggers[account].info(
-            "Старт скрипта getItems. Наборы: %s",
-            ", ".join(dataset_keys),
-        )
-
     for dataset_key in dataset_keys:
         config = DATASETS[dataset_key]
         dataset_label = config["label"]  # type: ignore[index]
@@ -576,18 +553,15 @@ def main() -> None:
 
         tasks: List[Tuple[str, Sequence[Dict[str, str]]]] = []
         for account in accounts:
-            logger = loggers[account]
             entity_path = entity_files_map.get(account)  # type: ignore[attr-defined]
             if entity_path is None:
                 message = f"Нет файла с данными ({dataset_label}) для аккаунта {account}"
                 LOGGER.warning(message)
-                logger.warning(message)
                 continue
             entity_path = Path(entity_path)
             if not entity_path.exists():
                 message = f"Файл {entity_path} не найден для {account} ({dataset_label})"
                 LOGGER.warning(message)
-                logger.warning(message)
                 continue
             entities = load_entities(entity_path)
             if args.limit is not None:
@@ -597,7 +571,6 @@ def main() -> None:
                     f"Нет записей в {entity_path} для {account} ({dataset_label})"
                 )
                 LOGGER.warning(message)
-                logger.warning(message)
                 continue
             tasks.append((account, entities))
 
@@ -606,32 +579,24 @@ def main() -> None:
 
         tasks_dict = {account: entities for account, entities in tasks}
         LOGGER.info("=== %s ===", dataset_label)
-        for account, entities in tasks:
-            loggers[account].info(
-                "Начало обработки набора '%s': %d элементов",
-                dataset_label,
-                len(entities),
-            )
 
         max_workers = min(len(tasks), MAX_WORKERS) or 1
         retry_plan: Dict[str, List[Dict[str, str]]] = {}
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_account = {
                 executor.submit(
-                    process_entities, account, entities, config, loggers[account]
+                    process_entities, account, entities, config, [account]
                 ): account
                 for account, entities in tasks
             }
             for future in as_completed(future_to_account):
                 account = future_to_account[future]
-                logger = loggers[account]
                 try:
                     failures = future.result()
                     if failures:
                         retry_plan.setdefault(account, []).extend(failures)
                 except Exception as exc:
                     LOGGER.error("[%s] Ошибка выполнения задач: %s", account, exc)
-                    logger.error("Ошибка выполнения задач аккаунта: %s", exc, exc_info=True)
                     retry_plan.setdefault(account, []).extend(
                         list(tasks_dict.get(account, []))
                     )
@@ -647,16 +612,12 @@ def main() -> None:
             remaining = list(unique.values())
             if not remaining:
                 continue
-            logger = loggers.setdefault(account, setup_logger(account))
-            logger.info("Повторная попытка: %d фабрик", len(remaining))
-            failures = process_entities(account, remaining, config, logger)
+            failures = process_entities(account, remaining, config, LOGGER)
             if failures:
                 names = ", ".join(f"{f['name']} ({f['id']})" for f in failures)
                 LOGGER.warning("После повторной попытки для %s остались ошибки: %s", account, names)
-                logger.warning("После повторной попытки остались ошибки: %s", names)
             else:
-                logger.info("Повторная попытка выполнена успешно")
-
+                LOGGER.info("Все фабрики успешно обработаны после повторной попытки для %s", account)
     LOGGER.info("Завершение getItems.")
 
 if __name__ == "__main__":

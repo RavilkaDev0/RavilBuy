@@ -19,14 +19,14 @@ DATASETS = [
         "name": "JV",
         "source_dir": Path("CSVDATA") / "JV_L",
         "output_dir": Path("readyJSON") / "JV",
-        "log_file": Path("LOGs") / "make_json_jv.log",
+        "log_file": Path("LOGs") / "makeJSON_JV.log",
         "ean_column": "EAN",
     },
     {
         "name": "XL",
         "source_dir": Path("CSVDATA") / "XL_L",
         "output_dir": Path("readyJSON") / "XL",
-        "log_file": Path("LOGs") / "make_json_xl.log",
+        "log_file": Path("LOGs") / "makeJSON_XL.log",
         "ean_column": "EAN",
     },
 ]
