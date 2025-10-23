@@ -15,8 +15,6 @@ ALL_FABRIKS: Dict[str, Path] = {
 }
 
 IGNORE_FABRIKS: Dict[str, Path] = {
-    "JV_F_P": Path("Ignore") / "JV_P.json",
-    "XL_F_P": Path("Ignore") / "XL_P.json",
     "JV_F_L": Path("Ignore") / "JV_L.json",
     "XL_F_L": Path("Ignore") / "XL_L.json",
 }

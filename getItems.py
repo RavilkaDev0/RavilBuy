@@ -14,16 +14,6 @@ import requests
 from logging_utils import setup_logging
 from getFabrik import ACCOUNT_ORDER, ensure_authenticated_session  # type: ignore
 
-FACTORY_FILES = {
-    "JV": Path("Fabriks") / "JV_F_P" / "factories.json",
-    "XL": Path("Fabriks") / "XL_F_P" / "factories.json",
-}
-
-PRODUCT_OUTPUT_DIRS = {
-    "JV": Path("itemsF") / "JV_I_P",
-    "XL": Path("itemsF") / "XL_I_P",
-}
-
 LISTER_COLLECTION_FILES = {
     "JV": Path("Fabriks") / "JV_F_L" / "collections.json",
     "XL": Path("Fabriks") / "XL_F_L" / "collections.json",
@@ -44,76 +34,7 @@ def configure_logging(verbose: bool) -> logging.Logger:
     console_level = logging.DEBUG if verbose else logging.INFO
     return setup_logging("getItems", console_level=console_level)
 
-PRODUCTS_PATH = "/afterbuy/shop/produkte.aspx"
 LISTER_PATH = "/afterbuy/ebayliste2.aspx"
-
-PRODUCT_PARAMS = {
-    "Su_Suchbegriff": "",
-    "PRFilter": "",
-    "Su_Suchbegriff_lg": "0",
-    "PRFilter1": "",
-    "Artikelnummer_Search": "",
-    "level__Search": "",
-    "Attributwert_Search": "",
-    "EAN_Search": "",
-    "Su_Listenlaenge": "500",
-    "Su_Listenlaenge_Ges": "15000",
-    "MyFreifeld": "0",
-    "Suche_BestandOP": "",
-    "Suche_Bestand_Wert": "0",
-    "MyFreifeldValue": "",
-    "Suche_ABestandOP": "",
-    "Suche_ABestand_Wert": "0",
-    "Katalog_Filter": "",
-    "Katalog_Filter_Kat2": "0",
-    "Katalog_Filter_Kat3": "0",
-    "Katalog_Filter_Kat4": "0",
-    "Katalog_Filter_Kat5": "0",
-    "StandardProductIDValue_Search": "",
-    "versandgruppe": "",
-    "versandgruppe_art": "0",
-    "vorlage": "",
-    "vorlageart": "0",
-    "Product_Search_Stocklocation_1": "",
-    "Product_Search_Stocklocation_1_Value": "",
-    "Product_Search_Stocklocation_2": "",
-    "Product_Search_Stocklocation_2_Value": "",
-    "Product_Search_Stocklocation_3": "",
-    "Product_Search_Stocklocation_3_Value": "",
-    "Product_Search_Stocklocation_4": "",
-    "Product_Search_Stocklocation_4_Value": "",
-    "productSearchSupplier1": "0",
-    "productSearchSupplier2": "0",
-    "productSearchSupplier3": "0",
-    "productSearchSupplier4": "0",
-    "ProductSearchSku": "",
-    "LastSaleFrom": "",
-    "ProductSearchMpn": "",
-    "LastSaleTo": "",
-    "ProductSearchFeatureId0": "0",
-    "ProductSearchFeatureValue0": "",
-    "ProductSearchFeatureId1": "0",
-    "ProductSearchFeatureValue1": "",
-    "ProductSearchFeatureId2": "0",
-    "ProductSearchFeatureValue2": "",
-    "ProductSearchFeatureId3": "0",
-    "ProductSearchFeatureValue3": "",
-    "ProductSearchFeatureId4": "0",
-    "ProductSearchFeatureValue4": "",
-    "productSearchUserTag1": "0",
-    "productSearchUserTag2": "0",
-    "productSearchUserTag3": "0",
-    "productSearchUserTag4": "0",
-    "SuchZusatzfeld1": "",
-    "SuchZusatzfeld2": "",
-    "SuchZusatzfeld3": "",
-    "SuchZusatzfeld4": "",
-    "SuchZusatzfeld5": "",
-    "SuchZusatzfeld6": "",
-    "spoid": "0",
-    "art": "SetAuswahl",
-    "ShowAdditionalFields": "1",
-}
 
 LISTER_PARAMS = {
     "art": "SetAuswahl",
@@ -150,20 +71,6 @@ HIDDEN_INPUT_NAME = "allmyupdtids"
 
 
 DATASETS = {
-    'product': {
-        'entity_files': FACTORY_FILES,
-        'count_files': FACTORY_FILES,
-        'output_dirs': PRODUCT_OUTPUT_DIRS,
-        'base_params': PRODUCT_PARAMS,
-        'endpoint': PRODUCTS_PATH,
-        'id_param': 'Katalog_Filter',
-        'page_size_keys': ('Su_Listenlaenge', 'Su_Listenlaenge_Ges', 'maxgesamt'),
-        'label': 'Каталоги товаров',
-        'console_prefix': 'CAT',
-        'referer_path': '/afterbuy/shop/produkte.aspx?newsearch=1&DT=1',
-        'hidden_input': HIDDEN_INPUT_NAME,
-        'timeout': 60,
-    },
     'lister': {
         'entity_files': LISTER_COLLECTION_FILES,
         'output_dirs': LISTER_OUTPUT_DIRS,
