@@ -1,15 +1,38 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 from typing import Optional
 
+from loguru import logger as _logger
+
 
 LOG_DIR = Path("LOGs")
-LOG_FORMAT_FILE = "%(asctime)s | %(levelname)-8s | %(message)s"
-LOG_FORMAT_CONSOLE = "%(asctime)s | %(levelname)-8s | %(message)s"
-FILE_TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
-CONSOLE_TIME_FORMAT = "%H:%M:%S"
+FILE_TIME_FORMAT = "YYYY-MM-DD HH:mm:ss"
+CONSOLE_TIME_FORMAT = "HH:mm:ss"
+
+
+class InterceptHandler(logging.Handler):
+    """Forward standard logging records to Loguru."""
+
+    def emit(self, record: logging.LogRecord) -> None:  # pragma: no cover - glue code
+        try:
+            level = _logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+        frame, depth = logging.currentframe(), 2
+        while frame and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+        _logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+
+def _level_name(level: int) -> str:
+    try:
+        return logging.getLevelName(level)
+    except Exception:
+        return str(level)
 
 
 def setup_logging(
@@ -17,43 +40,102 @@ def setup_logging(
     *,
     console_level: int = logging.INFO,
     file_level: int = logging.DEBUG,
-) -> logging.Logger:
-    """Configure and return a dedicated logger with console and file handlers."""
+):
+    """Configure Loguru sinks and bridge std logging to Loguru.
+
+    Returns a Loguru logger for convenience; standard logging loggers
+    will also be intercepted and written to the same sinks.
+    """
     LOG_DIR.mkdir(parents=True, exist_ok=True)
-    logger = logging.getLogger(name)
 
-    # Remove existing handlers to avoid duplicate logs when reconfiguring.
-    if logger.handlers:
-        for handler in list(logger.handlers):
-            logger.removeHandler(handler)
-            try:
-                handler.close()
-            except Exception:
-                pass
+    # Intercept std logging to loguru
+    root = logging.getLogger()
+    root.handlers = [InterceptHandler()]
+    root.setLevel(logging.NOTSET)
 
-    logger.setLevel(logging.DEBUG)
+    # Reset loguru to avoid duplicate sinks on reconfiguration
+    try:
+        _logger.remove()
+    except Exception:
+        pass
 
-    file_handler = logging.FileHandler(LOG_DIR / f"{name}.log", encoding="utf-8")
-    file_handler.setLevel(file_level)
-    file_handler.setFormatter(
-        logging.Formatter(LOG_FORMAT_FILE, FILE_TIME_FORMAT)
+    def _ensure_scope(record):  # type: ignore[override]
+        extra = record["extra"]
+        extra.setdefault("app", name)
+        scope = extra.get("app", name)
+        account = extra.get("account")
+        if account:
+            scope = f"{scope}/{account}"
+        extra["scope"] = scope
+        return True
+
+    # Console sink (compact, colorized)
+    _logger.add(
+        sys.stderr,
+        level=console_level,
+        format=f"{{time:{CONSOLE_TIME_FORMAT}}} | <level>{{level:<8}}</level> | {{extra[scope]:<18}} | {{message}}",
+        colorize=True,
+        enqueue=False,
+        diagnose=False,
+        filter=_ensure_scope,
     )
 
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(console_level)
-    console_handler.setFormatter(
-        logging.Formatter(LOG_FORMAT_CONSOLE, CONSOLE_TIME_FORMAT)
+    # File sink per logical logger name
+    _logger.add(
+        LOG_DIR / f"{name}.log",
+        level=file_level,
+        format=f"{{time:{FILE_TIME_FORMAT}}} | {{level:<8}} | {{extra[scope]:<18}} | {{message}}",
+        encoding="utf-8",
+        enqueue=True,
+        backtrace=False,
+        diagnose=False,
+        rotation="00:00",
+        retention="14 days",
+        compression="zip",
+        filter=_ensure_scope,
     )
 
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    logger.propagate = False
-
-    logger.debug(
+    # Сообщение о конфигурации (через std logging, чтобы работали %s плейсхолдеры в коде)
+    logging.getLogger(name).debug(
         "Logger '%s' configured (console_level=%s, file_level=%s)",
         name,
-        logging.getLevelName(console_level),
-        logging.getLevelName(file_level),
+        _level_name(console_level),
+        _level_name(file_level),
     )
-    return logger
+
+    # Возвращаем совместимый std-логгер; записи перехватываются Loguru
+    return logging.getLogger(name)
+
+
+def get_logger(app: str, **extra):
+    """Вернуть Loguru-логгер с привязанными полями (app, account, ...)."""
+    return _logger.bind(app=app, **extra)
+
+
+def add_account_file_sink(app: str, account: str, *, level: int = logging.INFO) -> int:
+    """Добавить отдельный файл-лог под аккаунт, вернуть id sink'а."""
+
+    path = LOG_DIR / f"{app}_{account}.log"
+
+    def _ensure_scope(record):
+        extra = record["extra"]
+        extra.setdefault("app", app)
+        extra.setdefault("account", account)
+        scope = f"{extra['app']}/{extra['account']}"
+        extra["scope"] = scope
+        return True
+
+    return _logger.add(
+        path,
+        level=level,
+        format=f"{{time:{FILE_TIME_FORMAT}}} | {{level:<8}} | {{extra[scope]:<18}} | {{message}}",
+        encoding="utf-8",
+        enqueue=True,
+        backtrace=False,
+        diagnose=False,
+        rotation="00:00",
+        retention="30 days",
+        compression="zip",
+        filter=_ensure_scope,
+    )
 

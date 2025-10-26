@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 import requests
+from requests.exceptions import Timeout
 
 from logging_utils import setup_logging
 from getFabrik import (
@@ -519,6 +520,8 @@ def main() -> None:
 
             account_output_dir = args.output_dir / f"{account}{ACCOUNT_OUTPUT_SUFFIX}"
             total = len(tasks)
+            failed_tasks: List[ListerExportTask] = []
+            succeeded = 0
 
             for index, task in enumerate(tasks, start=1):
                 if args.skip_existing:
@@ -551,6 +554,7 @@ def main() -> None:
                         config=export_config,
                     )
                     made = _count_csv_rows(output_path)
+                    made2 = made
                     LOGGER.info(
                         "[%s %d/%d] CSV сохранён: %s — создано %d из %d",
                         account,
@@ -578,6 +582,26 @@ def main() -> None:
                             "[%s %d/%d] Повтор завершён: %s — создано %d из %d",
                             account, index, total, output_path.name, made2, task.expected_count
                         )
+                    # success/failure accounting for main pass
+                    if made >= task.expected_count or made2 >= task.expected_count:
+                        succeeded += 1
+                    else:
+                        failed_tasks.append(task)
+                except Timeout:
+                    LOGGER.warning(
+                        "[%s %d/%d] Timeout �?� ��?���?�?�'��. �?�?�'�?�?������Ő�? �?� �����?�?���� �?� �������� ��� final-pass...",
+                        account,
+                        index,
+                        total,
+                    )
+                    try:
+                        if session is not None:
+                            session.close()
+                    except Exception:
+                        pass
+                    session, domain = ensure_authenticated_session(account)
+                    failed_tasks.append(task)
+                    continue
                 except Exception as exc:  # noqa: BLE001
                     LOGGER.error(
                         "[%s %d/%d] Ошибка при экспорте %s (%s): %s",
@@ -588,7 +612,89 @@ def main() -> None:
                         task.factory_id,
                         exc,
                     )
+                    failed_tasks.append(task)
                     continue
+            # Final retry pass for failures
+            if failed_tasks:
+                LOGGER.info(
+                    "[%s] �����?�?���� �����?�?����: %d. ��������� ���?���<�'��� �?� ���?�'�?�?������Ő�?...",
+                    account,
+                    len(failed_tasks),
+                )
+                # renew session before final pass
+                try:
+                    if session is not None:
+                        session.close()
+                except Exception:
+                    pass
+                session, domain = ensure_authenticated_session(account)
+
+                still_failed: List[ListerExportTask] = []
+                for task in failed_tasks:
+                    try:
+                        output_path = download_lister_csv(
+                            session=session,
+                            domain=domain,
+                            task=task,
+                            output_dir=account_output_dir,
+                            config=export_config,
+                        )
+                        made = _count_csv_rows(output_path)
+                        if made < task.expected_count:
+                            # one more attempt
+                            output_path = download_lister_csv(
+                                session=session,
+                                domain=domain,
+                                task=task,
+                                output_dir=account_output_dir,
+                                config=export_config,
+                            )
+                            made = _count_csv_rows(output_path)
+                        if made >= task.expected_count:
+                            succeeded += 1
+                            LOGGER.info(
+                                "[%s] �����?�?����: %s �?�?���?���?�? %d ��� %d",
+                                account,
+                                output_path.name,
+                                made,
+                                task.expected_count,
+                            )
+                        else:
+                            still_failed.append(task)
+                            LOGGER.warning(
+                                "[%s] �����?�?���� ��?�?���: %s (%d < %d)",
+                                account,
+                                output_path.name,
+                                made,
+                                task.expected_count,
+                            )
+                    except Exception as exc:
+                        still_failed.append(task)
+                        LOGGER.error(
+                            "[%s] �?�?��+��� �� final-pass ��� %s (%s): %s",
+                            account,
+                            task.factory_name or "<�+��� �?�����?���?��?>",
+                            task.factory_id,
+                            exc,
+                        )
+
+                if still_failed:
+                    LOGGER.warning(
+                        "[%s] ���������: �?�?�:�?���?��?�? %d, ��?�?��� %d: %s",
+                        account,
+                        total,
+                        len(still_failed),
+                        ", ".join(t.factory_id for t in still_failed),
+                    )
+                else:
+                    LOGGER.info("[%s] ���������: ���� ��������� ��������.", account)
+                try:
+                    ok_count = succeeded
+                    fail_count = len(still_failed)
+                    LOGGER.info("[%s] Summary: success %d, failed %d of %d", account, ok_count, fail_count, total)
+                except Exception:
+                    pass
+
         except Exception as exc:
             LOGGER.error("Не удалось подготовить авторизованную сессию для аккаунта %s: %s", account, exc)
             continue

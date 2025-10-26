@@ -1,15 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-exportHTML.py
-— Читает товары из readyJSON/<ACC>/*.json (ACC=JV|XL)
-— Для каждой записи берёт (ID, EAN)
-— Качает предпросмотр HTML с нужной фермы
-— В ответе ОТРЕЗАЕТ всё ВЫШЕ и ВКЛЮЧАЯ <div id="EBdescription">, сохраняет остаток как readyhtml/<ACC>/<EAN>.html
-Логин НЕ выполняет. Берёт куки из sessions/<acc>_cookies.json.
-Запуск:  python exportHTML.py
-ACC через переменную окружения AFTERBUY_ACCOUNT=JV|XL  (по умолчанию JV).
-"""
-
 import os, re, sys, json, glob, time, random
 from datetime import datetime
 import typing as t

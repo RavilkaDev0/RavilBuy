@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import requests
 
-from logging_utils import setup_logging
+from logging_utils import setup_logging, get_logger
 
 from Login import (  # type: ignore
     ACCOUNT_DOMAINS,
@@ -257,25 +257,9 @@ def save_json(path: Path, payload: List[Dict[str, str]]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def setup_logger(account: str) -> logging.Logger:
-    LOG_DIR.mkdir(exist_ok=True)
-    logger = logging.getLogger(f"getFabrik_{account}")
-    if logger.handlers:
-        for handler in logger.handlers:
-            handler.close()
-        logger.handlers.clear()
-
-    logger.setLevel(logging.INFO)
-    handler = logging.FileHandler(
-        LOG_DIR / f"getFabrik_{account}.log", encoding="utf-8"
-    )
-    formatter = logging.Formatter(
-        "%(asctime)s %(levelname)s: %(message)s", "%Y-%m-%d %H:%M:%S"
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.propagate = False
-    return logger
+def setup_logger(account: str):
+    # Единый файл лога (getFabrik.log), только привязываем контекст account
+    return get_logger("getFabrik", account=account)
 
 
 def process_account(
