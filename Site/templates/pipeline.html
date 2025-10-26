@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% block title %}Пайплайн - AfterBuy Control{% endblock %}
+{% block content %}
+  <section class="card span-8">
+    <div class="section-title">
+      <h2>Пайплайн (start.py)</h2>
+      <span class="badge">login → exporthtml</span>
+    </div>
+    <form method="post" action="{{ url_for('run_start') }}" onsubmit="return buildSteps()">
+      <div class="muted small" style="margin-bottom:6px">Выберите шаги (галочками включить/выключить):</div>
+      <div class="checkbox-list">
+        <label><input type="checkbox" name="step" value="login" checked> Авторизация (login)</label>
+        <label><input type="checkbox" name="step" value="getfabrik" checked> Обновить фабрики (getFabrik)</label>
+        <label><input type="checkbox" name="step" value="kill" checked> Чистка фабрик (killFabriks)</label>
+        <label><input type="checkbox" name="step" value="getitems" checked> Загрузка товаров (getItems)</label>
+        <label><input type="checkbox" name="step" value="exportlister" checked> Экспорт Lister CSV</label>
+        <label><input type="checkbox" name="step" value="makejson" checked> Генерация JSON</label>
+        <label><input type="checkbox" name="step" value="exporthtml" checked> Экспорт HTML</label>
+      </div>
+      <input type="hidden" id="steps" name="steps" value="login,getfabrik,kill,getitems,exportlister,makejson,exporthtml">
+      <div class="row small muted" style="margin-top:6px">Порядок: login, getfabrik, kill, getitems, exportlister, makejson, exporthtml</div>
+      <label class="row small" style="margin-top:6px"><input type="checkbox" name="verbose" value="1"> Подробные логи</label>
+      <div class="actions">
+        <button class="btn" type="submit">Запустить start.py</button>
+        <button class="btn secondary" type="button" onclick="resetSteps()">Сброс</button>
+      </div>
+    </form>
+    <form method="post" action="{{ url_for('run_stop') }}" onsubmit="return confirmStop()" style="display:inline">
+      <button class="btn" type="submit" style="background:#ef4444">Стоп</button>
+    </form>
+  </section>
+  <script>
+    function confirmStop(){ return confirm('Остановить запущенные процессы?'); }
+    const ORDER = ["login","getfabrik","kill","getitems","exportlister","makejson","exporthtml"];
+    function resetSteps(){
+      document.querySelectorAll('input[name="step"]').forEach(el=>{el.checked=true});
+      document.getElementById('steps').value = ORDER.join(',');
+    }
+    function buildSteps(){
+      const selected = new Set(Array.from(document.querySelectorAll('input[name="step"]:checked')).map(el=>el.value));
+      const steps = ORDER.filter(k=>selected.has(k));
+      document.getElementById('steps').value = steps.join(',');
+      return true;
+    }
+  </script>
+{% endblock %}

@@ -1,0 +1,72 @@
+{% extends 'base.html' %}
+{% block title %}Главная - AfterBuy Control{% endblock %}
+{% block content %}
+  <div class="grid">
+    <!-- Hero -->
+    <section class="card span-12 hero">
+      <div class="hero-left">
+        <h2>Добро пожаловать 👋</h2>
+        <p class="muted">Управляйте парсингом, игнором фабрик и экспортами в один клик.</p>
+        <div class="row" style="margin-top:10px">
+          <a class="btn" href="{{ url_for('page_pipeline') }}">Запустить пайплайн</a>
+          <a class="btn secondary" href="{{ url_for('page_ignore') }}">Управление Ignore</a>
+          <a class="btn secondary" href="{{ url_for('page_selected') }}">Выборочный парсинг</a>
+          <a class="btn secondary" href="{{ url_for('page_logs') }}">Логи</a>
+        </div>
+      </div>
+      <div class="hero-right">
+        <div class="stat">
+          <div class="label">Коллекции JV</div>
+          <div class="num">{{ counts['JV'] }}</div>
+        </div>
+        <div class="stat">
+          <div class="label">Коллекции XL</div>
+          <div class="num">{{ counts['XL'] }}</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Быстрые действия -->
+    <section class="card span-12">
+      <h2>Быстрые ссылки</h2>
+      <div class="link-cards">
+        <a class="link-card" href="{{ url_for('page_pipeline') }}">
+          <div class="icon">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 7h16M4 12h16M4 17h16" stroke="#a7f3d0" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </div>
+          <div>
+            <div class="title">Пайплайн</div>
+            <div class="desc">Последовательный запуск всех шагов</div>
+          </div>
+        </a>
+        <a class="link-card" href="{{ url_for('page_ignore') }}">
+          <div class="icon">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M12 21c-4.5 0-8-3-10-6 2-3 5.5-6 10-6s8 3 10 6c-2 3-5.5 6-10 6Z" stroke="#a7f3d0" stroke-width="1.6"/><circle cx="12" cy="15" r="2.5" fill="#22c55e"/></svg>
+          </div>
+          <div>
+            <div class="title">Ignore</div>
+            <div class="desc">Управление списком исключений</div>
+          </div>
+        </a>
+        <a class="link-card" href="{{ url_for('page_selected') }}">
+          <div class="icon">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M4 12l4 4 12-12" stroke="#a7f3d0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div>
+            <div class="title">Выборочно</div>
+            <div class="desc">Запуск только по выбранным фабрикам</div>
+          </div>
+        </a>
+        <a class="link-card" href="{{ url_for('page_logs') }}">
+          <div class="icon">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M5 4h14v14l-4-3H5V4Z" stroke="#a7f3d0" stroke-width="1.6"/></svg>
+          </div>
+          <div>
+            <div class="title">Логи</div>
+            <div class="desc">Хвост файлов с автообновлением</div>
+          </div>
+        </a>
+      </div>
+    </section>
+  </div>
+{% endblock %}

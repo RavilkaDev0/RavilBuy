@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}AfterBuy Control{% endblock %}</title>
+  <link rel="icon" href="data:,">
+  <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 12L12 3L21 12L12 21L3 12Z" stroke="white" stroke-opacity=".9" stroke-width="1.5"/><circle cx="12" cy="12" r="3" fill="#22c55e"/></svg>
+        </div>
+        <h1>AfterBuy Control</h1>
+      </div>
+      <nav class="nav">
+        <a class="{% if request.path == '/' %}active{% endif %}" href="{{ url_for('index') }}">Главная</a>
+        <a class="{% if request.path.startswith('/pipeline') %}active{% endif %}" href="{{ url_for('page_pipeline') }}">Пайплайн</a>
+        <a class="{% if request.path.startswith('/ignore') %}active{% endif %}" href="{{ url_for('page_ignore') }}">Ignore</a>
+        <a class="{% if request.path.startswith('/selected') %}active{% endif %}" href="{{ url_for('page_selected') }}">Выборочно</a>
+        <a class="{% if request.path.startswith('/logs') %}active{% endif %}" href="{{ url_for('page_logs') }}">Логи</a>
+      </nav>
+    </div>
+
+    {% for m in get_flashed_messages() %}
+      <div class="flash">{{ m }}</div>
+    {% endfor %}
+
+    {% block content %}{% endblock %}
+  </div>
+
+  <script>
+    function setStepsDefault(){
+      var el = document.getElementById('steps');
+      if (el) el.value='login,getfabrik,kill,getitems,exportlister,makejson,exporthtml';
+    }
+    function selectAll(prefix,on){
+      document.querySelectorAll('input[name^="'+prefix+'"]').forEach(function(el){el.checked=on});
+    }
+  </script>
+</body>
+</html>
+

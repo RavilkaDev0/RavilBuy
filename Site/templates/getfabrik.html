@@ -1,0 +1,14 @@
+﻿{% extends 'base.html' %}
+{% block title %}Фабрики — AfterBuy Control{% endblock %}
+{% block content %}
+  <section class="card span-5">
+    <div class="section-title">
+      <h2>Обновить списки фабрик</h2>
+      <span class="badge">JV <span class="counter">{{ counts['JV'] }}</span> · XL <span class="counter">{{ counts['XL'] }}</span></span>
+    </div>
+    <form method="post" action="{{ url_for('run_getfabrik') }}">
+      <label class="row small"><input type="checkbox" name="verbose" value="1"> подробный вывод</label>
+      <div class="actions"><button class="btn" type="submit">Запустить getFabrik.py</button></div>
+    </form>
+  </section>
+{% endblock %}

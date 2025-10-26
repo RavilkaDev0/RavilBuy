@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% block title %}Выборочно - AfterBuy Control{% endblock %}
+{% block content %}
+  <section class="card span-12">
+    <div class="section-title"><h2>Выборочный парсинг фабрик</h2><span class="badge">По выбору</span></div>
+    <form method="post" action="{{ url_for('run_selected') }}">
+      <div class="grid" style="gap:12px">
+        {% for acc, items in factories.items() %}
+          <div class="card span-6" style="padding:12px">
+            <div class="row" style="align-items:center;justify-content:space-between;margin-bottom:6px">
+              <div class="badge">{{ acc }}</div>
+              <div class="row small">
+                <a href="#" class="muted" onclick="selectAll('sel_{{ acc }}', true);return false;">Все</a>
+                <span class="muted">/</span>
+                <a href="#" class="muted" onclick="selectAll('sel_{{ acc }}', false);return false;">Ничего</a>
+              </div>
+            </div>
+            <input class="input" type="text" placeholder="Поиск" oninput="filterSel('{{ acc }}', this.value)" style="margin-bottom:6px;">
+            <div id="box_{{ acc }}" class="listbox" style="height:360px;">
+              {% for f in items|sort(attribute='name') %}
+                <label style="display:block;padding:4px 2px"><input type="checkbox" name="sel_{{ acc }}" value="{{ f['id'] }}"> {{ f['name'] }} <span class="muted">({{ f['id'] }})</span></label>
+              {% endfor %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+      <label class="row small" style="margin-top:10px"><input type="checkbox" name="verbose" value="1"> Подробные логи</label>
+      <div class="actions"><button class="btn" type="submit">Запустить выборочно</button></div>
+    </form>
+  </section>
+  <script>
+    function filterSel(acc, q){ q=(q||'').toLowerCase(); const box=document.getElementById('box_'+acc); box.querySelectorAll('label').forEach(el=>{ el.style.display = el.textContent.toLowerCase().includes(q)? 'block':'none'; }); }
+  </script>
+{% endblock %}
+

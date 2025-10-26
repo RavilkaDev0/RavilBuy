@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block title %}Ignore - AfterBuy Control{% endblock %}
+{% block content %}
+  <div class="grid">
+    <!-- Быстрый запуск обновления фабрик -->
+    <section class="card span-12">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <div class="muted">Текущие коллекции: JV {{ (counts['JV'] if counts else 0) }}, XL {{ (counts['XL'] if counts else 0) }}</div>
+        <form method="post" action="{{ url_for('run_getfabrik') }}" class="row" style="gap:8px">
+          <label class="small muted"><input type="checkbox" name="verbose" value="1"> Подробные логи</label>
+          <button class="btn" type="submit">Обновить фабрики (getFabrik)</button>
+        </form>
+      </div>
+    </section>
+    <!-- Блок: добавление в Ignore -->
+    <section class="card span-12">
+      <div class="section-title"><h2>Добавить в Ignore</h2></div>
+      <form method="post" action="{{ url_for('add_ignore') }}">
+        <div class="cols">
+          <div>
+            <label class="muted small">Аккаунт</label>
+            <select name="account" id="ignoreAcc" class="input"><option>JV</option><option>XL</option><option>ALL</option></select>
+          </div>
+          <div class="row" style="align-items:end;justify-content:flex-end">
+            <span class="kbd">Shift</span><span class="muted small">+ клики для диапазона</span>
+          </div>
+        </div>
+        <input class="input" type="text" id="searchIgnore" placeholder="Поиск по фабрикам" style="margin:8px 0;">
+        <div id="list_JV" class="listbox" style="margin-top:4px; height:360px;">
+          {% for f in (factories.get('JV') or []) %}
+            <label><input type="checkbox" name="factory_id" value="JV:{{ f['id'] }}"> {{ f['name'] }} <span class="muted">({{ f['id'] }})</span></label>
+          {% endfor %}
+        </div>
+        <div id="list_XL" class="listbox" style="display:none; margin-top:4px; height:360px;">
+          {% for f in (factories.get('XL') or []) %}
+            <label><input type="checkbox" name="factory_id" value="XL:{{ f['id'] }}"> {{ f['name'] }} <span class="muted">({{ f['id'] }})</span></label>
+          {% endfor %}
+        </div>
+        <div id="list_ALL" class="listbox" style="display:none; margin-top:4px; height:360px;">
+          {% for f in (factories.get('JV') or []) %}
+            <label><input type="checkbox" name="factory_id" value="JV:{{ f['id'] }}"> [JV] {{ f['name'] }} <span class="muted">({{ f['id'] }})</span></label>
+          {% endfor %}
+          {% for f in (factories.get('XL') or []) %}
+            <label><input type="checkbox" name="factory_id" value="XL:{{ f['id'] }}"> [XL] {{ f['name'] }} <span class="muted">({{ f['id'] }})</span></label>
+          {% endfor %}
+        </div>
+        <div class="row small" style="margin-top:6px">
+          <a href="#" class="muted" onclick="selectAll('factory_id', true);return false;">Все</a>
+          <span class="muted">/</span>
+          <a href="#" class="muted" onclick="selectAll('factory_id', false);return false;">Ничего</a>
+        </div>
+        <div class="actions"><button class="btn" type="submit">Добавить в игнор</button></div>
+      </form>
+    </section>
+
+    <!-- Блок: уже в Ignore — единый список -->
+    <section class="card span-12">
+      <div class="section-title"><h2>Сейчас в Ignore</h2></div>
+      <div class="listbox" style="height:300px;">
+        {% for f in (ignore.get('JV') or []) %}
+          <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">[JV] {{ f['name'] }} <span class="muted">({{ f['id'] }})</span></div>
+        {% endfor %}
+        {% for f in (ignore.get('XL') or []) %}
+          <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">[XL] {{ f['name'] }} <span class="muted">({{ f['id'] }})</span></div>
+        {% endfor %}
+      </div>
+    </section>
+  </div>
+  <script>
+    const accSel = document.getElementById('ignoreAcc');
+    const boxJV = document.getElementById('list_JV');
+    const boxXL = document.getElementById('list_XL');
+    const boxALL = document.getElementById('list_ALL');
+    const search = document.getElementById('searchIgnore');
+    function updateView(){ const v = accSel.value; boxJV.style.display = v==='JV'? 'block':'none'; boxXL.style.display = v==='XL'? 'block':'none'; boxALL.style.display = v==='ALL'? 'block':'none'; applyFilter(); }
+    function applyFilter(){ const q = (search.value||'').toLowerCase(); const active = accSel.value==='JV'? boxJV : (accSel.value==='XL'? boxXL : boxALL); active.querySelectorAll('label').forEach(el=>{ el.style.display = el.textContent.toLowerCase().includes(q)? 'block':'none'; }); }
+    accSel.addEventListener('change', updateView);
+    search.addEventListener('input', applyFilter);
+    updateView();
+  </script>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends 'base.html' %}
+{% block title %}Логи - AfterBuy Control{% endblock %}
+{% block content %}
+  <section class="card span-12">
+    <div class="section-title"><h2>Логи</h2><span class="badge">Хвост + автообновление</span></div>
+    <div class="row" style="gap:16px; align-items:stretch;">
+      <div class="card span-3" style="max-height:520px; overflow:auto;">
+        <h3 class="muted">Файлы</h3>
+        <ul id="logfiles" class="listbox" style="height:460px;">
+          {% for f in files %}
+          <li><a href="#" onclick="openLog('{{ f }}'); return false;">{{ f }}</a></li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="card span-9" style="position:relative;">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <div class="badge" id="logname">Откройте файл слева</div>
+          <div class="row small">
+            <a href="#" class="muted" onclick="pauseResume(); return false;" id="pauseBtn">Пауза</a>
+          </div>
+        </div>
+        <pre id="logview" class="listbox" style="height:460px; white-space:pre-wrap; word-break:break-word; overflow:auto;"></pre>
+      </div>
+    </div>
+  </section>
+  <script>
+    let current = null; let pos = null; let timer = null; let paused = false;
+    function openLog(name){ current = name; pos = null; document.getElementById('logview').textContent=''; document.getElementById('logname').textContent=name; if(timer) clearInterval(timer); paused=false; timer=setInterval(poll, 1500); poll(); }
+    function pauseResume(){ paused=!paused; document.getElementById('pauseBtn').textContent = paused? 'Возобновить':'Пауза'; }
+    async function poll(){ if(!current||paused) return; try{ const url = new URL('{{ url_for('page_logs') }}', window.location); url.pathname = '/logs/stream'; if(pos!==null) url.searchParams.set('pos', pos); url.searchParams.set('name', current); const r = await fetch(url.toString()); if(!r.ok) return; const js = await r.json(); pos = js.pos; if(js.data){ const v = document.getElementById('logview'); v.textContent += js.data; v.scrollTop = v.scrollHeight; } }catch(e){} }
+  </script>
+{% endblock %}
+

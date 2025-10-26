@@ -6,7 +6,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Sequence
+from typing import Dict, List, Sequence
 
 from logging_utils import setup_logging
 
@@ -19,19 +19,18 @@ class Step:
 
 
 def find_script(root: Path, candidate: str) -> Path:
-    # На Windows регистр не важен, но для переносимости пробуем точные имена
     path = root / candidate
     if path.exists():
         return path
-    # Подстрахуемся: иногда пишут Logi.py вместо Login.py
+    # Доп. соответствия (на случай опечаток)
     aliases = {
         "Logi.py": "Login.py",
     }
     alt = aliases.get(candidate)
     if alt:
-        p = root / alt
-        if p.exists():
-            return p
+        alt_path = root / alt
+        if alt_path.exists():
+            return alt_path
     return path
 
 
@@ -71,6 +70,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--python", default=sys.executable, help="Путь к интерпретатору Python")
     parser.add_argument("--keep-going", action="store_true", help="Не останавливать выполнение при ошибке шага")
     parser.add_argument("--verbose", action="store_true", help="Подробный вывод и проксирование --verbose в дочерние скрипты")
+    parser.add_argument("--steps", help="Порядок шагов: login,getfabrik,kill,getitems,exportlister,makejson,exporthtml")
     return parser.parse_args()
 
 
@@ -80,15 +80,32 @@ def main() -> None:
 
     project_root = Path(__file__).resolve().parent
 
-    steps: List[Step] = [
-        Step("Авторизация", "Login.py"),
-        Step("Загрузка фабрик/коллекций", "getFabrik.py"),
-        Step("Очистка фабрик", "killFabriks.py"),
-        Step("Получение товаров", "getItems.py"),
-        Step("Экспорт Lister CSV", "exportLister.py"),
-        Step("Сборка JSON", "makeJson.py"),
-        Step("Экспорт HTML", "exportHTML.py"),
+    registry: Dict[str, Step] = {
+        "login": Step("Авторизация", "Login.py"),
+        "getfabrik": Step("Загрузка фабрик/коллекций", "getFabrik.py"),
+        "kill": Step("Очистка фабрик", "killFabriks.py"),
+        "getitems": Step("Получение товаров", "getItems.py"),
+        "exportlister": Step("Экспорт Lister CSV", "exportLister.py"),
+        "makejson": Step("Сборка JSON", "makeJson.py"),
+        "exporthtml": Step("Экспорт HTML", "exportHTML.py"),
+    }
+
+    default_order = [
+        "login",
+        "getfabrik",
+        "kill",
+        "getitems",
+        "exportlister",
+        "makejson",
+        "exporthtml",
     ]
+
+    order = default_order
+    if args.steps:
+        keys = [k.strip().lower() for k in args.steps.split(",") if k.strip()]
+        order = [k for k in keys if k in registry] or default_order
+
+    steps: List[Step] = [registry[k] for k in order]
 
     overall_rc = 0
     for step in steps:
