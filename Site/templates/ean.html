@@ -1,0 +1,298 @@
+{% extends "base.html" %}
+{% block title %}EAN{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="card span-4" id="factoryPanel">
+    <h2>Фабрики</h2>
+    <p class="muted small">Выбери аккаунт и фабрику. Зелёная галочка означает, что для неё есть готовые JSON.</p>
+    <div class="account-tabs" id="accountTabs">
+      {% for acc in accounts %}
+      <button type="button"
+              class="tab-btn{% if acc == initial_account %} active{% endif %}"
+              data-account-tab="{{ acc }}"
+              title="Готово JSON: {{ stats[acc]['ready'] }} из {{ stats[acc]['total'] }}">
+        {{ acc }}
+        <span class="tab-meta">{{ stats[acc]["ready"] }}/{{ stats[acc]["total"] }}</span>
+      </button>
+      {% endfor %}
+    </div>
+    <input type="text" class="input" id="factorySearch" placeholder="Поиск по имени или ID">
+    <div class="factory-list" id="factoryList"></div>
+    <div class="muted small" id="factoryHint">Совет: начни печатать название или ID, чтобы отфильтровать список.</div>
+  </div>
+
+  <div class="card span-8" id="eanCard">
+    <div class="ean-header">
+      <div>
+        <h2 id="eanTitle">EAN</h2>
+        <div class="small muted" id="eanMeta">Выбор фабрики покажет список EAN.</div>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn secondary" id="copyBtn" disabled>Скопировать</button>
+      </div>
+    </div>
+    <div id="eanError" class="flash negative hidden"></div>
+    <pre id="eanList" class="ean-list hidden"></pre>
+    <div id="eanSources" class="small muted hidden"></div>
+  </div>
+</div>
+
+<script id="factories-data" type="application/json">{{ factories|tojson }}</script>
+<script id="stats-data" type="application/json">{{ stats|tojson }}</script>
+<script id="ean-config" type="application/json">{{
+  {
+    "initialAccount": initial_account,
+    "apiTemplate": api_template
+  }|tojson
+}}</script>
+
+<script>
+  function readJsonScript(id) {
+    const el = document.getElementById(id);
+    if (!el) {
+      return null;
+    }
+    try {
+      return JSON.parse(el.textContent);
+    } catch (error) {
+      console.error("Failed to parse JSON payload:", id, error);
+      return null;
+    }
+  }
+
+  const factoriesData = readJsonScript("factories-data") || {};
+  const statsData = readJsonScript("stats-data") || {};
+  const configData = readJsonScript("ean-config") || {};
+  let currentAccount = configData.initialAccount || "JV";
+  const apiTemplate = configData.apiTemplate || "";
+
+  const accountTabs = document.querySelectorAll("[data-account-tab]");
+  const factoryListEl = document.getElementById("factoryList");
+  const searchInput = document.getElementById("factorySearch");
+  const copyBtn = document.getElementById("copyBtn");
+  const eanTitle = document.getElementById("eanTitle");
+  const eanMeta = document.getElementById("eanMeta");
+  const eanList = document.getElementById("eanList");
+  const eanSources = document.getElementById("eanSources");
+  const eanError = document.getElementById("eanError");
+
+  let activeFactoryId = null;
+
+  function buildApiUrl(account, factoryId) {
+    return apiTemplate
+      .replace("ACCOUNT_PLACEHOLDER", encodeURIComponent(account))
+      .replace("FACTORY_PLACEHOLDER", encodeURIComponent(factoryId));
+  }
+
+  function syncAccountTabs() {
+    accountTabs.forEach((btn) => {
+      const acc = btn.dataset.accountTab;
+      btn.classList.toggle("active", acc === currentAccount);
+      const ready = statsData[acc]?.ready ?? 0;
+      const total = statsData[acc]?.total ?? 0;
+      const meta = btn.querySelector(".tab-meta");
+      if (meta) {
+        meta.textContent = `${ready}/${total}`;
+      }
+    });
+  }
+
+  function renderFactoryList() {
+    const items = factoriesData[currentAccount] || [];
+    const term = searchInput.value.trim().toLowerCase();
+    factoryListEl.innerHTML = "";
+
+    const filtered = term
+      ? items.filter((item) => {
+          return (
+            item.name.toLowerCase().includes(term) ||
+            item.id.toLowerCase().includes(term)
+          );
+        })
+      : items;
+
+    if (!filtered.length) {
+      const msg = document.createElement("div");
+      msg.className = "muted small";
+      msg.textContent = term
+        ? "Нет фабрик по такому запросу."
+        : "Список пуст. Запусти getFabrik.";
+      factoryListEl.appendChild(msg);
+      return;
+    }
+
+    filtered.forEach((item) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "factory-btn";
+      if (!item.has_ready) {
+        btn.classList.add("no-data");
+      }
+      if (item.id === activeFactoryId) {
+        btn.classList.add("active");
+      }
+      btn.dataset.factoryId = item.id;
+      btn.dataset.hasReady = item.has_ready ? "true" : "false";
+      btn.title = `${item.name} (${item.id})`;
+
+      const top = document.createElement("div");
+      top.className = "factory-top";
+
+      const name = document.createElement("span");
+      name.className = "factory-name";
+      name.textContent = item.name;
+
+      const badge = document.createElement("span");
+      badge.className = "factory-status";
+      badge.textContent = item.has_ready ? "✓" : "";
+
+      top.appendChild(name);
+      top.appendChild(badge);
+
+      const meta = document.createElement("div");
+      meta.className = "factory-meta";
+      meta.textContent = item.has_ready ? item.id : `${item.id} · нет JSON`;
+
+      btn.appendChild(top);
+      btn.appendChild(meta);
+      factoryListEl.appendChild(btn);
+    });
+  }
+
+  function resetEanView() {
+    activeFactoryId = null;
+    copyBtn.disabled = true;
+    copyBtn.textContent = "Скопировать";
+    copyBtn.classList.remove("copied");
+    copyBtn.onclick = null;
+    eanList.textContent = "";
+    eanList.classList.add("hidden");
+    eanSources.textContent = "";
+    eanSources.classList.add("hidden");
+    eanError.classList.add("hidden");
+    eanTitle.textContent = "EAN";
+    eanMeta.textContent = "Выбор фабрики покажет список EAN.";
+  }
+
+  function setLoadingState(factoryName) {
+    eanError.classList.add("hidden");
+    eanList.classList.remove("hidden");
+    eanSources.classList.add("hidden");
+    copyBtn.disabled = true;
+    copyBtn.textContent = "Скопировать";
+    copyBtn.classList.remove("copied");
+    copyBtn.onclick = null;
+    eanTitle.textContent = factoryName ? `EAN · ${factoryName}` : "EAN";
+    eanMeta.textContent = "Загружаем данные…";
+    eanList.textContent = "Загрузка…";
+  }
+
+  function showError(message) {
+    copyBtn.disabled = true;
+    copyBtn.textContent = "Скопировать";
+    copyBtn.classList.remove("copied");
+    copyBtn.onclick = null;
+    eanList.classList.add("hidden");
+    eanSources.classList.add("hidden");
+    eanError.textContent = message;
+    eanError.classList.remove("hidden");
+    eanMeta.textContent = "Ошибка при получении данных.";
+  }
+
+  function showEans(data) {
+    copyBtn.textContent = "Скопировать";
+    copyBtn.classList.remove("copied");
+    eanError.classList.add("hidden");
+    const { factory_name, factory_id, eans, ean_count, total_items, blank_ean_count, sources } = data;
+    eanTitle.textContent = `${factory_name} (${factory_id})`;
+    eanMeta.textContent = `EAN: ${ean_count} • Всего записей: ${total_items} • Пустых EAN: ${blank_ean_count}`;
+    const text = (eans || []).join("\n");
+    eanList.textContent = text || "EAN не найдены.";
+    eanList.classList.remove("hidden");
+    if (sources && sources.length) {
+      eanSources.textContent = `Файлы: ${sources.join(", ")}`;
+      eanSources.classList.remove("hidden");
+    } else {
+      eanSources.classList.add("hidden");
+    }
+    copyBtn.disabled = !text;
+    if (copyBtn.disabled) {
+      copyBtn.classList.remove("copied");
+    }
+    copyBtn.onclick = () => {
+      if (!text) {
+        return;
+      }
+      navigator.clipboard.writeText(text).then(() => {
+        copyBtn.classList.add("copied");
+        copyBtn.textContent = "Скопировано!";
+        setTimeout(() => {
+          copyBtn.classList.remove("copied");
+          copyBtn.textContent = "Скопировать";
+        }, 1200);
+      }).catch(() => {
+        showError("Не удалось скопировать в буфер обмена.");
+      });
+    };
+  }
+
+  function handleFactoryClick(event) {
+    const btn = event.target.closest(".factory-btn");
+    if (!btn) {
+      return;
+    }
+    const factoryId = btn.dataset.factoryId;
+    if (!factoryId) {
+      return;
+    }
+    activeFactoryId = factoryId;
+    factoryListEl.querySelectorAll(".factory-btn").forEach((el) => {
+      el.classList.toggle("active", el === btn);
+    });
+    const nameEl = btn.querySelector(".factory-name");
+    const factoryName = nameEl ? nameEl.textContent : "";
+    setLoadingState(factoryName);
+
+    const url = buildApiUrl(currentAccount, factoryId);
+    fetch(url, { headers: { Accept: "application/json" } })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload) {
+          throw new Error(payload?.error || "Не удалось загрузить данные.");
+        }
+        showEans(payload);
+      })
+      .catch((error) => {
+        showError(error.message || "Не удалось загрузить данные.");
+      });
+  }
+
+  function setAccount(account) {
+    if (!account || account === currentAccount) {
+      return;
+    }
+    currentAccount = account;
+    activeFactoryId = null;
+    searchInput.value = "";
+    syncAccountTabs();
+    renderFactoryList();
+    resetEanView();
+  }
+
+  accountTabs.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setAccount(btn.dataset.accountTab);
+    });
+  });
+
+  searchInput.addEventListener("input", () => {
+    renderFactoryList();
+  });
+
+  factoryListEl.addEventListener("click", handleFactoryClick);
+
+  syncAccountTabs();
+  renderFactoryList();
+  resetEanView();
+</script>
+{% endblock %}

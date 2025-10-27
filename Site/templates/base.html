@@ -20,6 +20,7 @@
         <a class="{% if request.path == '/' %}active{% endif %}" href="{{ url_for('index') }}">Главная</a>
         <a class="{% if request.path.startswith('/pipeline') %}active{% endif %}" href="{{ url_for('page_pipeline') }}">Пайплайн</a>
         <a class="{% if request.path.startswith('/ignore') %}active{% endif %}" href="{{ url_for('page_ignore') }}">Ignore</a>
+        <a class="{% if request.path.startswith('/ean') %}active{% endif %}" href="{{ url_for('page_ean') }}">EAN</a>
         <a class="{% if request.path.startswith('/selected') %}active{% endif %}" href="{{ url_for('page_selected') }}">Выборочно</a>
         <a class="{% if request.path.startswith('/logs') %}active{% endif %}" href="{{ url_for('page_logs') }}">Логи</a>
       </nav>

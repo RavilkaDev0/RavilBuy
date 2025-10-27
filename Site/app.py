@@ -21,6 +21,10 @@ from flask import (
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 SITE_DIR = Path(__file__).resolve().parent
+
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 IGNORE_DIR = BASE_DIR / "Ignore"
 FABRIKS_DIR = BASE_DIR / "Fabriks"
 SELECTION_FILE = SITE_DIR / "data" / "selection.json"
@@ -46,6 +50,12 @@ app.secret_key = os.environ.get("SITE_SECRET", "dev-secret")
 
 
 ACCOUNTS = ["JV", "XL"]
+
+from getEANfromJSON import (  # noqa: E402
+    build_ready_index as ean_build_ready_index,
+    extract_eans as ean_extract_eans,
+    load_collections as ean_load_collections,
+)
 
 
 def _read_json_robust(path: Path):
@@ -121,6 +131,7 @@ def page_pipeline():
 def page_getfabrik():
     return redirect(url_for("page_ignore"))
 
+
 @app.route("/ignore")
 def page_ignore():
     def _safe_list(items: object) -> list[dict[str, str]]:
@@ -155,6 +166,108 @@ def page_ignore():
 def page_selected():
     factories = load_factories()
     return render_template("selected.html", factories=factories)
+
+
+def _factory_view() -> tuple[dict[str, list[dict[str, object]]], dict[str, dict[str, int]]]:
+    raw_factories = load_factories()
+    ready_index = {acc: ean_build_ready_index(acc) for acc in ACCOUNTS}
+
+    view: dict[str, list[dict[str, object]]] = {acc: [] for acc in ACCOUNTS}
+    stats: dict[str, dict[str, int]] = {}
+
+    for acc in ACCOUNTS:
+        entries: list[dict[str, object]] = []
+        raw_list = raw_factories.get(acc, [])
+        for item in raw_list:
+            if not isinstance(item, dict):
+                continue
+            factory_id = str(item.get("id", "")).strip()
+            if not factory_id:
+                continue
+            name = str(item.get("name", "")).strip() or f"factory_{factory_id}"
+            has_ready = factory_id in ready_index.get(acc, {})
+            entries.append({
+                "id": factory_id,
+                "name": name,
+                "has_ready": has_ready,
+            })
+        entries.sort(key=lambda x: str(x["name"]).lower())
+        view[acc] = entries
+        stats[acc] = {
+            "total": len(entries),
+            "ready": sum(1 for entry in entries if entry["has_ready"]),
+        }
+    return view, stats
+
+
+@app.route("/ean")
+def page_ean():
+    factories, stats = _factory_view()
+    requested = request.args.get("account", default="JV", type=str) or "JV"
+    requested = requested.upper()
+    if requested not in ACCOUNTS:
+        requested = next((acc for acc in ACCOUNTS if factories.get(acc)), ACCOUNTS[0])
+    initial_account = requested
+    api_template = url_for("api_ean_factory", account="ACCOUNT_PLACEHOLDER", factory_id="FACTORY_PLACEHOLDER")
+    return render_template(
+        "ean.html",
+        factories=factories,
+        stats=stats,
+        accounts=ACCOUNTS,
+        initial_account=initial_account,
+        api_template=api_template,
+    )
+
+
+@app.get("/ean/<account>/<factory_id>")
+def api_ean_factory(account: str, factory_id: str):
+    account = (account or "").upper()
+    factory_id = str(factory_id or "").strip()
+    if account not in ACCOUNTS:
+        return jsonify({"error": "Неизвестный аккаунт.", "code": "unknown_account"}), 404
+    try:
+        collections = ean_load_collections(account)
+    except FileNotFoundError:
+        return jsonify({"error": "Файл collections.json не найден.", "code": "missing_collections"}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc), "code": "invalid_collections"}), 500
+
+    if factory_id not in collections:
+        return jsonify({"error": "Фабрика не найдена.", "code": "unknown_factory"}), 404
+
+    ready_index = ean_build_ready_index(account)
+    sources = ready_index.get(factory_id, [])
+    if not sources:
+        return jsonify({"error": "Для этой фабрики нет готовых JSON.", "code": "no_ready_json"}), 404
+
+    try:
+        eans, total_items, empty_count, empty_details = ean_extract_eans(
+            sources,
+            dedupe=True,
+            include_empty=True,
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc), "code": "parse_error"}), 500
+
+    source_files: list[str] = []
+    for path in sources:
+        try:
+            source_files.append(str(path.relative_to(BASE_DIR)))
+        except ValueError:
+            source_files.append(str(path))
+
+    payload = {
+        "account": account,
+        "factory_id": factory_id,
+        "factory_name": collections[factory_id],
+        "eans": eans,
+        "ean_count": len(eans),
+        "total_items": total_items,
+        "blank_ean_count": empty_count,
+        "blank_entries": empty_details,
+        "sources": source_files,
+    }
+    return jsonify(payload)
 
 
 @app.route("/logs")
@@ -287,6 +400,8 @@ def add_ignore():
             pass
     flash(f"В игнор добавлено: {added}")
     return redirect(url_for("page_ignore"))
+
+
 @app.post("/selected/run")
 def run_selected():
     # РЎРѕР±РёСЂР°РµРј РІС‹Р±РѕСЂ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Рё Р·Р°РїСѓСЃРєР°РµРј СЃРїРµС†РёР°Р»РёР·РёСЂРѕРІР°РЅРЅС‹Р№ СЃРєСЂРёРїС‚
