@@ -1,3 +1,4 @@
+import subprocess
 import os, re, sys, json, glob, time, threading
 import typing as t
 import requests
@@ -74,11 +75,15 @@ def _env_float(name: str, default: float) -> float:
     except (TypeError, ValueError):
         return default
 
-DEFAULT_WORKERS = min(8, max(2, os.cpu_count() or 4))
-MAX_WORKERS = _env_int("EXPORTHTML_WORKERS", DEFAULT_WORKERS)
+MAX_WORKERS = 10
 REQUEST_DELAY = _env_float("EXPORTHTML_DELAY", 0.0)
-SUBMIT_CHUNK = max(MAX_WORKERS * 4, MAX_WORKERS)
+SUBMIT_CHUNK = _env_int("EXPORTHTML_SUBMIT_CHUNK", 100)
+MAX_FETCH_RETRIES = _env_int("EXPORTHTML_RETRIES", 4)
+MIN_HTML_LENGTH = _env_int("EXPORTHTML_MIN_SIZE", 256)
+RELOGIN_FILE_CHUNK = _env_int("EXPORTHTML_LOGIN_CHUNK", 100)
 _THREAD_LOCAL = threading.local()
+_COOKIES_CACHE: dict[str, t.Mapping[str, str]] = {}
+_COOKIES_LOCK = threading.Lock()
 
 # ---------- парсер JSON ----------
 def iter_products(obj: t.Any) -> t.Iterable[dict]:
@@ -187,37 +192,108 @@ def _get_session(cookie_dict: t.Mapping[str, str]) -> requests.Session:
         _THREAD_LOCAL.session = session
     return session
 
+
+def _reset_session() -> None:
+    session = getattr(_THREAD_LOCAL, "session", None)
+    if session is not None:
+        try:
+            session.close()
+        except Exception:
+            pass
+        delattr(_THREAD_LOCAL, "session")
+
+
+def _load_cookie_dict(path: str) -> t.Mapping[str, str]:
+    if not path:
+        return {}
+    tmp_session = requests.Session()
+    try:
+        jar = load_cookies(tmp_session, path)
+    finally:
+        tmp_session.close()
+    return dict_from_cookiejar(jar) if jar else {}
+
+
+def _run_login(account: str) -> int:
+    cmd = [sys.executable, "Login.py", "--account", account]
+    log(f"[{account}] Запуск Login.py для обновления cookies", "INFO")
+    try:
+        proc = subprocess.run(cmd, cwd=os.getcwd())
+        return proc.returncode
+    except Exception as exc:  # noqa: BLE001
+        log(f"[{account}] Не удалось выполнить Login.py: {exc}", "ERROR")
+        return 1
+
+
+def get_cookies(account: str, cookies_file: str, force_login: bool = False) -> t.Mapping[str, str]:
+    account = account.upper()
+    with _COOKIES_LOCK:
+        if not force_login:
+            cached = _COOKIES_CACHE.get(account)
+            if cached:
+                return cached
+
+        cookie_dict = _load_cookie_dict(cookies_file)
+        need_login = force_login or not cookie_dict
+        if need_login:
+            rc = _run_login(account)
+            if rc != 0:
+                log(f"[{account}] Login.py завершился с кодом {rc}", "ERROR")
+            cookie_dict = _load_cookie_dict(cookies_file) or {}
+
+        _COOKIES_CACHE[account] = cookie_dict
+        return cookie_dict
+
+
 def process_product(
     item_id: str,
     ean: str,
     farm: str,
     out_dir: str,
-    cookie_dict: t.Mapping[str, str],
+    account: str,
+    cookies_file: str,
 ) -> tuple[str, t.Optional[str]]:
-    session = _get_session(cookie_dict)
-    try:
-        html = fetch_html(session, farm, item_id)
-    except requests.RequestException as exc:
-        return "error", f"HTTP error id={item_id}: {exc}"
+    current_cookies = dict(get_cookies(account, cookies_file))
+    last_error: t.Optional[str] = None
 
-    if not html or len(html) < 256:
-        if REQUEST_DELAY:
-            time.sleep(REQUEST_DELAY)
-        log(f"EAN {ean}: получен пустой HTML, пропуск (item {item_id})", "DEBUG")
-        return "skip", None
+    for attempt in range(1, MAX_FETCH_RETRIES + 1):
+        session = _get_session(current_cookies)
+        try:
+            html = fetch_html(session, farm, item_id)
+        except requests.RequestException as exc:
+            last_error = f"HTTP error id={item_id} attempt={attempt}: {exc}"
+        else:
+            if html and len(html) >= MIN_HTML_LENGTH:
+                trimmed = trim_to_ebdescription(html)
+                if trimmed and len(trimmed) >= max(64, MIN_HTML_LENGTH // 2):
+                    out_path = os.path.join(out_dir, f"{ean}.html")
+                    try:
+                        with open(out_path, "w", encoding="utf-8", newline="") as f:
+                            f.write(trimmed)
+                    except Exception as exc:
+                        last_error = f"Save error EAN={ean} id={item_id}: {exc}"
+                    else:
+                        log(f"EAN {ean}: сохранён HTML (item {item_id})", "DEBUG")
+                        if REQUEST_DELAY:
+                            time.sleep(REQUEST_DELAY)
+                        return "saved", None
+                else:
+                    last_error = f"EAN {ean}: пустое описание (item {item_id})"
+            else:
+                last_error = f"EAN {ean}: пустой HTML (item {item_id})"
 
-    html = trim_to_ebdescription(html)
-    out_path = os.path.join(out_dir, f"{ean}.html")
-    try:
-        with open(out_path, "w", encoding="utf-8", newline="") as f:
-            f.write(html)
-    except Exception as exc:
-        return "error", f"Save error EAN={ean} id={item_id}: {exc}"
+        if attempt < MAX_FETCH_RETRIES:
+            if last_error:
+                log(f"EAN {ean}: повторная попытка #{attempt} из-за: {last_error}", "WARNING")
+            _reset_session()
+            current_cookies = dict(get_cookies(account, cookies_file, force_login=True))
+            if REQUEST_DELAY:
+                time.sleep(max(REQUEST_DELAY, 0.5))
+            continue
+        else:
+            break
 
-    log(f"EAN {ean}: сохранён HTML (item {item_id})", "DEBUG")
-    if REQUEST_DELAY:
-        time.sleep(REQUEST_DELAY)
-    return "saved", None
+    return "error", last_error or f"Не удалось получить HTML EAN {ean} (item {item_id})"
 
 # ---------- main ----------
 def main() -> int:
@@ -235,15 +311,12 @@ def main() -> int:
     log(f"JSON файлов для обработки: {len(json_files)}")
     log(f"Используемых потоков: {MAX_WORKERS}")
 
-    base_session = requests.Session()
-    base_session.headers.update(HEADERS)
-    cookie_jar = load_cookies(base_session, cookies_file)
-    cookie_dict: t.Mapping[str, str] = dict_from_cookiejar(cookie_jar) if cookie_jar else {}
-    base_session.close()
+    get_cookies(acc, cookies_file)
 
     saved = skipped = errors = 0
     total_products = 0
     scheduled = 0
+    download_targets: list[tuple[str, str]] = []
 
     def handle_future(future) -> None:
         nonlocal saved, skipped, errors
@@ -264,7 +337,11 @@ def main() -> int:
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         active: t.Set[t.Any] = set()
-        for p in json_files:
+        for idx, p in enumerate(json_files, start=1):
+            if idx > 1 and (idx - 1) % RELOGIN_FILE_CHUNK == 0:
+                log(f"Обработано {idx-1} файлов, обновляем авторизацию...", "INFO")
+                _reset_session()
+                get_cookies(acc, cookies_file, force_login=True)
             try:
                 with open(p, "r", encoding="utf-8") as f:
                     data = json.load(f)
@@ -286,7 +363,10 @@ def main() -> int:
                     log(f"{os.path.basename(p)}: запись без ID/EAN пропущена", "DEBUG")
                     continue
 
-                future = executor.submit(process_product, item_id, ean, farm, out_dir, cookie_dict)
+                download_targets.append((item_id, ean))
+                future = executor.submit(
+                    process_product, item_id, ean, farm, out_dir, acc, cookies_file
+                )
                 active.add(future)
                 scheduled += 1
                 file_scheduled += 1
@@ -300,10 +380,27 @@ def main() -> int:
                 f"{os.path.basename(p)}: найдено {file_total}, поставлено {file_scheduled}, пропущено без ID/EAN {file_missing}"
             )
 
-        log(f"Передано на выгрузку: {scheduled} товаров (из найденных {total_products})")
-        for fut in as_completed(active):
-            handle_future(fut)
+    log(f"Передано на выгрузку: {scheduled} товаров (из найденных {total_products})")
+    for fut in as_completed(active):
+        handle_future(fut)
 
+    missing_html = []
+    if download_targets:
+        existing_html = {os.path.splitext(name)[0] for name in os.listdir(out_dir) if name.lower().endswith(".html")}
+        for item_id, ean in download_targets:
+            if ean not in existing_html:
+                missing_html.append((item_id, ean))
+
+    if missing_html:
+        log(f"Обнаружены отсутствующие HTML: {len(missing_html)}. Начинаем догрузку...", "WARNING")
+        _reset_session()
+        get_cookies(acc, cookies_file, force_login=True)
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            for item_id, ean in missing_html:
+                executor.submit(process_product, item_id, ean, farm, out_dir, acc, cookies_file)
+
+    log(f"Готово. Сохранено: {saved}, пропущено: {skipped}, ошибок: {errors}")
     log(f"Готово. Сохранено: {saved}, пропущено: {skipped}, ошибок: {errors}")
     return 0
 

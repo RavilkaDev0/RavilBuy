@@ -11,7 +11,11 @@ import tempfile
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Set, Tuple
+
+
+class EmptyItemIdsError(ValueError):
+    """Raised when items file contains no item_ids."""
 
 import requests
 from requests.exceptions import Timeout
@@ -158,7 +162,7 @@ def load_factory_from_json(path: Path) -> ListerExportTask:
         if value:
             item_ids.append(value)
     if not item_ids:
-        raise ValueError(f"Файл {path} содержит пустой список 'item_ids'.")
+        raise EmptyItemIdsError(f"Файл {path} содержит пустой список 'item_ids'.")
     return ListerExportTask(factory_id, factory_name, item_ids, path)
 
 
@@ -179,6 +183,9 @@ def discover_lister_tasks(
     for path in sorted(directory.glob("*.json")):
         try:
             task = load_factory_from_json(path)
+        except EmptyItemIdsError:
+            LOGGER.debug("Пропуск %s: пустой список item_ids.", path)
+            continue
         except Exception as exc:  # noqa: BLE001
             LOGGER.error("Не удалось прочитать %s: %s", path, exc)
             continue
@@ -197,6 +204,61 @@ def discover_lister_tasks(
 def find_existing_export(output_dir: Path, task: ListerExportTask) -> Optional[Path]:
     p = output_dir / task.default_filename()
     return p if p.is_file() else None
+
+
+def _normalize_ean_value(value) -> Optional[str]:
+    if value is None:
+        return None
+    digits = "".join(ch for ch in str(value) if ch.isdigit())
+    if not digits:
+        return None
+    return digits[-13:] if len(digits) >= 13 else digits
+
+
+def cleanup_existing_outputs(account: str, csv_path: Path) -> None:
+    ready_json_path = Path("readyJSON") / account / f"{csv_path.stem}.json"
+    ready_html_dir = Path("readyhtml") / account
+
+    eans: Set[str] = set()
+    if ready_json_path.exists():
+        try:
+            data = json.loads(ready_json_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Не удалось прочитать JSON %s: %s", ready_json_path, exc)
+        else:
+            if isinstance(data, list):
+                for entry in data:
+                    if isinstance(entry, dict):
+                        normalized = _normalize_ean_value(entry.get("ean") or entry.get("EAN"))
+                        if normalized:
+                            eans.add(normalized)
+
+    removed_html = 0
+    if ready_html_dir.is_dir() and eans:
+        for ean in eans:
+            html_path = ready_html_dir / f"{ean}.html"
+            if html_path.exists():
+                try:
+                    html_path.unlink()
+                    removed_html += 1
+                except Exception as exc:  # noqa: BLE001
+                    LOGGER.warning("Не удалось удалить HTML %s: %s", html_path, exc)
+        if removed_html:
+            LOGGER.info("[%s] Удалено HTML файлов: %d (%s)", account, removed_html, csv_path.stem)
+
+    if ready_json_path.exists():
+        try:
+            ready_json_path.unlink()
+            LOGGER.info("[%s] Удалён JSON: %s", account, ready_json_path.name)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Не удалось удалить JSON %s: %s", ready_json_path, exc)
+
+    if csv_path.exists():
+        try:
+            csv_path.unlink()
+            LOGGER.info("[%s] Удалён CSV: %s", account, csv_path.name)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Не удалось удалить CSV %s: %s", csv_path, exc)
 
 
 # ===== HTTP =====
@@ -458,13 +520,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_ROOT_DIR)
     parser.add_argument("--skip-existing", action="store_true")
+    parser.add_argument("--refresh-existing", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--definition-id", default=None)
     parser.add_argument("--export-format-id", default=None)
     parser.add_argument("--expprod", default=DEFAULT_EXPPROD)
     parser.add_argument("--export-encoding", default=DEFAULT_EXPORT_ENCODING)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.skip_existing and args.refresh_existing:
+        parser.error("Нельзя одновременно использовать --skip-existing и --refresh-existing.")
+    return args
 
 
 def main() -> None:
@@ -524,17 +590,25 @@ def main() -> None:
             succeeded = 0
 
             for index, task in enumerate(tasks, start=1):
-                if args.skip_existing:
-                    existing = find_existing_export(account_output_dir, task)
-                    if existing:
-                        LOGGER.info(
-                            "[%s %d/%d] Пропуск: CSV уже существует (%s).",
-                            account,
-                            index,
-                            total,
-                            existing,
-                        )
-                        continue
+                existing = find_existing_export(account_output_dir, task)
+                if existing and args.skip_existing:
+                    LOGGER.info(
+                        "[%s %d/%d] Пропуск: CSV уже существует (%s).",
+                        account,
+                        index,
+                        total,
+                        existing,
+                    )
+                    continue
+                if existing and args.refresh_existing:
+                    LOGGER.info(
+                        "[%s %d/%d] Обнаружен существующий CSV (%s). Удаление и повторный экспорт.",
+                        account,
+                        index,
+                        total,
+                        existing,
+                    )
+                    cleanup_existing_outputs(account, existing)
 
                 LOGGER.info(
                     "[%s %d/%d] Экспорт коллекции %s (%s) — %d товаров.",

@@ -70,7 +70,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--python", default=sys.executable, help="Путь к интерпретатору Python")
     parser.add_argument("--keep-going", action="store_true", help="Не останавливать выполнение при ошибке шага")
     parser.add_argument("--verbose", action="store_true", help="Подробный вывод и проксирование --verbose в дочерние скрипты")
-    parser.add_argument("--steps", help="Порядок шагов: login,getfabrik,kill,getitems,exportlister,makejson,exporthtml")
+    parser.add_argument(
+        "--steps",
+        help="Порядок шагов: login,getfabrik,kill,getitems,exportlister,makejson,exporthtml,makedb,selectedrun",
+    )
+    parser.add_argument(
+        "--selection-file",
+        type=Path,
+        help="JSON с выбранными фабриками для шага selectedrun",
+    )
     return parser.parse_args()
 
 
@@ -88,7 +96,14 @@ def main() -> None:
         "exportlister": Step("Экспорт Lister CSV", "exportLister.py"),
         "makejson": Step("Сборка JSON", "makeJson.py"),
         "exporthtml": Step("Экспорт HTML", "exportHTML.py"),
+        "makedb": Step("Обновление SQLite БД", "makeDB.py", args=("--overwrite",)),
     }
+
+    if args.selection_file:
+        selection_path = args.selection_file.expanduser().resolve()
+        registry["selectedrun"] = Step(
+            "Выборочный пайплайн", "selectedRun.py", args=("--selection-file", str(selection_path))
+        )
 
     default_order = [
         "login",
@@ -98,6 +113,7 @@ def main() -> None:
         "exportlister",
         "makejson",
         "exporthtml",
+        "makedb",
     ]
 
     order = default_order

@@ -4,7 +4,7 @@
   <section class="card span-8">
     <div class="section-title">
       <h2>Пайплайн (start.py)</h2>
-      <span class="badge">login → exporthtml</span>
+      <span class="badge">login → makedb</span>
     </div>
     <form method="post" action="{{ url_for('run_start') }}" onsubmit="return buildSteps()">
       <div class="muted small" style="margin-bottom:6px">Выберите шаги (галочками включить/выключить):</div>
@@ -16,13 +16,16 @@
         <label><input type="checkbox" name="step" value="exportlister" checked> Экспорт Lister CSV</label>
         <label><input type="checkbox" name="step" value="makejson" checked> Генерация JSON</label>
         <label><input type="checkbox" name="step" value="exporthtml" checked> Экспорт HTML</label>
+        <label><input type="checkbox" name="step" value="selectedrun"> Выборочно (selectedRun)</label>
+        <label><input type="checkbox" name="step" value="makedb" checked> Обновление БД (makeDB)</label>
       </div>
-      <input type="hidden" id="steps" name="steps" value="login,getfabrik,kill,getitems,exportlister,makejson,exporthtml">
-      <div class="row small muted" style="margin-top:6px">Порядок: login, getfabrik, kill, getitems, exportlister, makejson, exporthtml</div>
+      <input type="hidden" id="steps" name="steps" value="login,getfabrik,kill,getitems,exportlister,makejson,exporthtml,makedb">
+      <div class="row small muted" style="margin-top:6px">Порядок: login, getfabrik, kill, getitems, exportlister, makejson, exporthtml, selectedrun, makedb</div>
       <label class="row small" style="margin-top:6px"><input type="checkbox" name="verbose" value="1"> Подробные логи</label>
       <div class="actions">
         <button class="btn" type="submit">Запустить start.py</button>
         <button class="btn secondary" type="button" onclick="resetSteps()">Сброс</button>
+        <button class="btn secondary" type="button" onclick="setSelectedOnly()">Только выборочно</button>
       </div>
     </form>
     <form method="post" action="{{ url_for('run_stop') }}" onsubmit="return confirmStop()" style="display:inline">
@@ -31,10 +34,15 @@
   </section>
   <script>
     function confirmStop(){ return confirm('Остановить запущенные процессы?'); }
-    const ORDER = ["login","getfabrik","kill","getitems","exportlister","makejson","exporthtml"];
+    const ORDER = ["login","getfabrik","kill","getitems","exportlister","makejson","exporthtml","selectedrun","makedb"];
     function resetSteps(){
       document.querySelectorAll('input[name="step"]').forEach(el=>{el.checked=true});
       document.getElementById('steps').value = ORDER.join(',');
+    }
+    function setSelectedOnly(){
+      const wanted = new Set(["login","selectedrun"]);
+      document.querySelectorAll('input[name="step"]').forEach(el=>{el.checked=wanted.has(el.value)});
+      document.getElementById('steps').value = ORDER.filter(k=>wanted.has(k)).join(',');
     }
     function buildSteps(){
       const selected = new Set(Array.from(document.querySelectorAll('input[name="step"]:checked')).map(el=>el.value));

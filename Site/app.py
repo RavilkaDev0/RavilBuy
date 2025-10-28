@@ -28,6 +28,7 @@ if str(BASE_DIR) not in sys.path:
 IGNORE_DIR = BASE_DIR / "Ignore"
 FABRIKS_DIR = BASE_DIR / "Fabriks"
 SELECTION_FILE = SITE_DIR / "data" / "selection.json"
+SELECTION_TASKS_FILE = SITE_DIR / "data" / "selection_tasks.json"
 LOGS_DIR = BASE_DIR / "LOGs"
 PIDS_FILE = SITE_DIR / "data" / "pids.json"
 
@@ -162,10 +163,29 @@ def page_ignore():
     view_ignore = {k: _safe_list(v) for k, v in raw_ignore.items()}
     return render_template("ignore.html", factories=filtered_factories, ignore=view_ignore, counts=counts)
 
+def load_selected_tasks() -> Dict[str, bool]:
+    defaults = {
+        "getitems": True,
+        "exportlister": True,
+        "makejson": True,
+        "exporthtml": True,
+    }
+    if SELECTION_TASKS_FILE.exists():
+        try:
+            data = json.loads(SELECTION_TASKS_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                for key in list(defaults.keys()):
+                    defaults[key] = bool(data.get(key, defaults[key]))
+        except Exception:
+            pass
+    return defaults
+
+
 @app.route("/selected")
 def page_selected():
     factories = load_factories()
-    return render_template("selected.html", factories=factories)
+    tasks = load_selected_tasks()
+    return render_template("selected.html", factories=factories, tasks=tasks)
 
 
 def _factory_view() -> tuple[dict[str, list[dict[str, object]]], dict[str, dict[str, int]]]:
@@ -345,12 +365,26 @@ def _pids_add(pid: int) -> None:
 @app.post("/run/start")
 def run_start():
     steps = request.form.get("steps", "").strip()
+    step_list = [s for s in steps.split(",") if s]
     args = [
         _python(),
         str(BASE_DIR / "start.py"),
     ]
-    if steps:
-        args += ["--steps", steps]
+    if step_list:
+        args += ["--steps", ",".join(step_list)]
+    if "selectedrun" in step_list:
+        if not SELECTION_FILE.exists():
+            flash("Сначала выберите фабрики на вкладке 'Выборочно'.")
+            return redirect(url_for("page_pipeline"))
+        try:
+            data = json.loads(SELECTION_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+        has_selection = any(v for v in data.values() if v)
+        if not has_selection:
+            flash("Список выбранных фабрик пуст. Отметьте фабрики и сохраните выбор.")
+            return redirect(url_for("page_pipeline"))
+        args += ["--selection-file", str(SELECTION_FILE.resolve())]
     if request.form.get("verbose"):
         args.append("--verbose")
 
@@ -404,7 +438,6 @@ def add_ignore():
 
 @app.post("/selected/run")
 def run_selected():
-    # РЎРѕР±РёСЂР°РµРј РІС‹Р±РѕСЂ РїРѕР»СЊР·РѕРІР°С‚РµР»СЏ Рё Р·Р°РїСѓСЃРєР°РµРј СЃРїРµС†РёР°Р»РёР·РёСЂРѕРІР°РЅРЅС‹Р№ СЃРєСЂРёРїС‚
     selection: Dict[str, List[str]] = {acc: [] for acc in ACCOUNTS}
     for acc in ACCOUNTS:
         ids = request.form.getlist(f"sel_{acc}")
@@ -413,12 +446,33 @@ def run_selected():
     SELECTION_FILE.parent.mkdir(parents=True, exist_ok=True)
     SELECTION_FILE.write_text(json.dumps(selection, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    args = [_python(), str(BASE_DIR / "selectedRun.py"), "--selection-file", str(SELECTION_FILE)]
-    if request.form.get("verbose"):
-        args.append("--verbose")
-    proc = subprocess.Popen(args, cwd=str(BASE_DIR))
-    _pids_add(proc.pid)
-    flash("Запущен разовый парсинг выбранных фабрик")
+    action = request.form.get("action", "save")
+    has_selection = any(selection.get(acc) for acc in ACCOUNTS)
+
+    tasks = {
+        "getitems": bool(request.form.get("task_getitems")),
+        "exportlister": bool(request.form.get("task_exportlister")),
+        "makejson": bool(request.form.get("task_makejson")),
+        "exporthtml": bool(request.form.get("task_exporthtml")),
+    }
+    SELECTION_TASKS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SELECTION_TASKS_FILE.write_text(json.dumps(tasks, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    if action == "run":
+        if not has_selection:
+            flash("Сначала выберите хотя бы одну фабрику.")
+            return redirect(url_for("page_selected"))
+        if not any(tasks.values()):
+            flash("Нужно выбрать хотя бы один этап выполнения.")
+            return redirect(url_for("page_selected"))
+        args = [_python(), str(BASE_DIR / "selectedRun.py"), "--selection-file", str(SELECTION_FILE)]
+        if request.form.get("verbose"):
+            args.append("--verbose")
+        proc = subprocess.Popen(args, cwd=str(BASE_DIR))
+        _pids_add(proc.pid)
+        flash("Запущен выборочный пайплайн.")
+    else:
+        flash("Выбор фабрик сохранён.")
     return redirect(url_for("page_selected"))
 
 

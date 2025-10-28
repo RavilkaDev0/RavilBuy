@@ -24,12 +24,24 @@
           </div>
         {% endfor %}
       </div>
+      <div class="row small muted" style="margin-top:12px">Этапы:</div>
+      <div class="checkbox-list" style="margin-bottom:8px">
+        <label><input type="checkbox" name="task_getitems" value="1" {% if tasks.get('getitems') %}checked{% endif %}> Получение товаров (getItems)</label>
+        <label><input type="checkbox" name="task_exportlister" value="1" {% if tasks.get('exportlister') %}checked{% endif %}> Экспорт Lister CSV</label>
+        <label><input type="checkbox" name="task_makejson" value="1" {% if tasks.get('makejson') %}checked{% endif %}> Генерация JSON</label>
+        <label><input type="checkbox" name="task_exporthtml" value="1" {% if tasks.get('exporthtml') %}checked{% endif %}> Экспорт HTML</label>
+      </div>
       <label class="row small" style="margin-top:10px"><input type="checkbox" name="verbose" value="1"> Подробные логи</label>
-      <div class="actions"><button class="btn" type="submit">Запустить выборочно</button></div>
+      <div class="actions">
+        <button class="btn" type="submit" name="action" value="save">Сохранить выбор</button>
+        <button class="btn secondary" type="submit" name="action" value="run">Сохранить и запустить сейчас</button>
+      </div>
+      <p class="muted small">Чтобы выполнить полный пайплайн только для выбранных фабрик, открой вкладку «Пайплайн» и включи шаг <code>selectedrun</code>.</p>
     </form>
   </section>
   <script>
     function filterSel(acc, q){ q=(q||'').toLowerCase(); const box=document.getElementById('box_'+acc); box.querySelectorAll('label').forEach(el=>{ el.style.display = el.textContent.toLowerCase().includes(q)? 'block':'none'; }); }
   </script>
 {% endblock %}
+
 
