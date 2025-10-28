@@ -4,8 +4,10 @@ import json
 import os
 import subprocess
 import sys
+import sqlite3
 from pathlib import Path
-from typing import Dict, List
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from flask import (
     Flask,
@@ -51,6 +53,27 @@ app.secret_key = os.environ.get("SITE_SECRET", "dev-secret")
 
 
 ACCOUNTS = ["JV", "XL"]
+
+
+@dataclass(frozen=True)
+class ItemSource:
+    account: str
+    path: Path
+    farm_base: str
+
+    def edit_url(self, item_id: Optional[str]) -> Optional[str]:
+        if not item_id:
+            return None
+        return (
+            f"{self.farm_base}/afterbuy/ebayliste2.aspx"
+            f"?art=edit&id={item_id}&rsposition=0&rssuchbegriff="
+        )
+
+
+ITEM_SOURCES: List[ItemSource] = [
+    ItemSource("JV", BASE_DIR / "DB" / "JV_json.db", "https://farm01.afterbuy.de"),
+    ItemSource("XL", BASE_DIR / "DB" / "XL_json.db", "https://farm04.afterbuy.de"),
+]
 
 from getEANfromJSON import (  # noqa: E402
     build_ready_index as ean_build_ready_index,
@@ -117,6 +140,131 @@ def save_ignore(data: Dict[str, List[Dict[str, str]]]) -> None:
         p.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _items_count_rows(path: Path) -> int:
+    with sqlite3.connect(path) as conn:
+        cur = conn.execute("SELECT COUNT(*) FROM items")
+        value, = cur.fetchone()
+    return int(value or 0)
+
+
+def _items_collect_sources() -> Tuple[List[Tuple[ItemSource, int]], int]:
+    entries: List[Tuple[ItemSource, int]] = []
+    total = 0
+    for source in ITEM_SOURCES:
+        if not source.path.exists():
+            count = 0
+        else:
+            count = _items_count_rows(source.path)
+        entries.append((source, count))
+        total += count
+    return entries, total
+
+
+def _items_fetch_row(source: ItemSource, offset: int) -> Tuple[Dict[str, Optional[str]], Sequence[str]]:
+    with sqlite3.connect(source.path) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.execute(
+            "SELECT * FROM items ORDER BY row_id LIMIT 1 OFFSET ?",
+            (offset,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            raise IndexError(f"Row at offset {offset} not found for {source.account}.")
+        keys = row.keys()
+        data = {key: row[key] for key in keys}
+    return data, keys
+
+
+def _items_parse_pictures(raw_value: Optional[str]) -> List[str]:
+    if not raw_value:
+        return []
+    value = raw_value.strip()
+    if not value:
+        return []
+    candidates: Iterable[str]
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        separators = [",", "\n", ";", "|"]
+        for sep in separators:
+            if sep in value:
+                candidates = (part.strip() for part in value.split(sep))
+                break
+        else:
+            candidates = (value,)
+    else:
+        if isinstance(decoded, str):
+            candidates = (decoded,)
+        elif isinstance(decoded, Iterable):
+            candidates = (str(item).strip() for item in decoded if item)
+        else:
+            candidates = ()
+    result: List[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        result.append(candidate)
+    return result
+
+
+def _items_collect_images(row: Dict[str, Optional[str]]) -> List[str]:
+    images: List[str] = []
+    for key in ("GalleryURL", "PictureURL"):
+        value = row.get(key)
+        if isinstance(value, str) and value.strip():
+            images.append(value.strip())
+    images.extend(_items_parse_pictures(row.get("pictureurls")))
+    deduped: List[str] = []
+    seen: set[str] = set()
+    for url in images:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        deduped.append(url)
+    return deduped
+
+
+def _items_prepare_payload(idx: int) -> Dict[str, object]:
+    entries, total = _items_collect_sources()
+    if total == 0:
+        abort(503, description="Нет данных для отображения.")
+    if idx < 0 or idx >= total:
+        abort(404, description="Элемент с указанным индексом не найден.")
+
+    remaining = idx
+    source: ItemSource
+    count_for_source = 0
+    for source, count in entries:
+        if remaining < count:
+            count_for_source = count
+            break
+        remaining -= count
+    else:
+        abort(404, description="Элемент с указанным индексом не найден.")
+
+    row, field_order = _items_fetch_row(source, remaining)
+    images = _items_collect_images(row)
+    edit_url = source.edit_url(row.get("ID"))
+    fields = [(key, row.get(key)) for key in field_order]
+
+    payload: Dict[str, object] = {
+        "account": source.account,
+        "account_total": count_for_source,
+        "farm_base": source.farm_base,
+        "edit_url": edit_url,
+        "images": images,
+        "fields": fields,
+        "global_index": idx,
+        "local_index": remaining,
+        "total": total,
+    }
+    return payload
+
+
 @app.route("/")
 def index():
     counts = {acc: len(load_factories().get(acc, [])) for acc in ACCOUNTS}
@@ -126,6 +274,47 @@ def index():
 @app.route("/pipeline")
 def page_pipeline():
     return render_template("pipeline.html")
+
+
+@app.get("/items")
+def page_items():
+    idx_raw = request.args.get("idx", "0")
+    try:
+        idx = int(idx_raw)
+    except ValueError:
+        abort(400, description="Индекс должен быть числом.")
+
+    payload = _items_prepare_payload(idx)
+    prev_idx = payload["global_index"] - 1 if payload["global_index"] > 0 else None
+    next_idx = (
+        payload["global_index"] + 1
+        if payload["global_index"] + 1 < payload["total"]
+        else None
+    )
+
+    pictureurls_raw: Optional[str] = None
+    for key, value in payload["fields"]:
+        if key == "pictureurls":
+            pictureurls_raw = value  # type: ignore[assignment]
+            break
+
+    pictureurls_display: Optional[str]
+    if isinstance(pictureurls_raw, str):
+        try:
+            parsed = json.loads(pictureurls_raw)
+            pictureurls_display = json.dumps(parsed, ensure_ascii=False, indent=2)
+        except json.JSONDecodeError:
+            pictureurls_display = pictureurls_raw
+    else:
+        pictureurls_display = pictureurls_raw
+
+    return render_template(
+        "items.html",
+        payload=payload,
+        prev_idx=prev_idx,
+        next_idx=next_idx,
+        pictureurls_display=pictureurls_display,
+    )
 
 
 @app.route("/getfabrik")

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Просмотр товаров{% endblock %}
+{% block content %}
+<style>
+  .item-header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;margin-bottom:16px}
+  .item-meta{display:flex;flex-wrap:wrap;gap:12px}
+  .item-meta .badge{font-size:13px;padding:6px 12px}
+  .item-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+  .item-nav a{font-weight:600}
+  .item-images{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:20px}
+  .item-images img{width:220px;height:200px;object-fit:cover;border-radius:12px;box-shadow:var(--shadow);border:1px solid rgba(148,163,184,.25)}
+  .item-table{width:100%;border-collapse:collapse;background:#0b1229;border-radius:12px;overflow:hidden}
+  .item-table th,.item-table td{padding:10px 14px;border-bottom:1px solid #1f2937;vertical-align:top;text-align:left}
+  .item-table th{width:220px;color:#cbd5e1;text-transform:uppercase;font-size:12px;letter-spacing:.08em;background:#0a1020}
+  .item-table tr:last-child th,.item-table tr:last-child td{border-bottom:none}
+  .muted{color:#94a3b8}
+  .preformatted{white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#0a1020;border:1px solid #1f2937;border-radius:10px;padding:10px;margin:0}
+</style>
+<div class="grid">
+  <div class="card">
+    <div class="item-header">
+      <div>
+        <h2>Просмотр товаров</h2>
+        <div class="muted">Элемент #{{ payload.global_index + 1 }} из {{ payload.total }}</div>
+      </div>
+      {% if payload.edit_url %}
+      <div class="actions">
+        <a class="btn" href="{{ payload.edit_url }}" target="_blank" rel="noopener noreferrer">Открыть в Afterbuy</a>
+      </div>
+      {% endif %}
+    </div>
+    <div class="item-meta">
+      <span class="badge">Аккаунт: {{ payload.account }}</span>
+      <span class="badge">Позиция в аккаунте: {{ payload.local_index + 1 }} / {{ payload.account_total }}</span>
+      <span class="badge">Фарм: {{ payload.farm_base }}</span>
+    </div>
+    <div class="item-nav">
+      {% if prev_idx is not none %}
+        <a href="{{ url_for('page_items', idx=prev_idx) }}">&larr; Предыдущий</a>
+      {% else %}
+        <span></span>
+      {% endif %}
+      {% if next_idx is not none %}
+        <a href="{{ url_for('page_items', idx=next_idx) }}">Следующий &rarr;</a>
+      {% else %}
+        <span></span>
+      {% endif %}
+    </div>
+    {% if payload.images %}
+    <div class="item-images">
+      {% for img in payload.images %}
+        <a href="{{ img }}" target="_blank" rel="noopener noreferrer">
+          <img src="{{ img }}" alt="Фото {{ loop.index }}">
+        </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="item-fields">
+      <table class="item-table">
+        <tbody>
+        {% for key, value in payload.fields %}
+          <tr>
+            <th>{{ key }}</th>
+            <td>
+              {% if value is none or (value is string and not value.strip()) %}
+                <span class="muted">нет данных</span>
+              {% elif key == 'pictureurls' and pictureurls_display %}
+                <pre class="preformatted">{{ pictureurls_display }}</pre>
+              {% else %}
+                {{ value }}
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
